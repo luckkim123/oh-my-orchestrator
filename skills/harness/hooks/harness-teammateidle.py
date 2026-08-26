@@ -131,8 +131,8 @@ def main() -> int:
         tid = str(owned[0].get("id") or "")
         title = str(owned[0].get("title") or "")
         sys.stderr.write(
-            f"HARNESS: 你仍有进行中的任务 [{tid}] {title}。"
-            "请继续执行或完成该任务后再停止。\n"
+            f"HARNESS: task [{tid}] {title} is still in_progress and owned by you. "
+            "Finish it or hand it back before going idle.\n"
         )
         return 2  # block idle
 
@@ -141,8 +141,8 @@ def main() -> int:
         tid = str(next_t.get("id") or "")
         title = str(next_t.get("title") or "")
         sys.stderr.write(
-            f"HARNESS: 仍有 {len(pending)} 个待执行 + {len(retryable)} 个可重试任务。"
-            f"下一个: [{tid}] {title}。请继续执行。\n"
+            f"HARNESS: {len(pending)} eligible and {len(retryable)} retryable tasks remain. "
+            f"Next: [{tid}] {title}. Continue.\n"
         )
         return 2  # block idle
 

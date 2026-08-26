@@ -81,7 +81,7 @@ func BenchmarkJSONParse_ParseJSONStreamInternal(b *testing.B) {
 	}
 }
 
-// BenchmarkLoggerWrite 测试日志写入性能
+// BenchmarkLoggerWrite measures log write throughput
 func BenchmarkLoggerWrite(b *testing.B) {
 	logger, err := NewLogger()
 	if err != nil {
@@ -97,7 +97,7 @@ func BenchmarkLoggerWrite(b *testing.B) {
 	logger.Flush()
 }
 
-// BenchmarkLoggerConcurrentWrite 测试并发日志写入性能
+// BenchmarkLoggerConcurrentWrite measures concurrent log write throughput
 func BenchmarkLoggerConcurrentWrite(b *testing.B) {
 	logger, err := NewLogger()
 	if err != nil {

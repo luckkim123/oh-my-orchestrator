@@ -34,7 +34,7 @@ func stripTimestampPrefix(line string) string {
 	return line
 }
 
-// TestConcurrentStressLogger 高并发压力测试
+// TestConcurrentStressLogger -- high-concurrency stress test
 func TestConcurrentStressLogger(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping stress test in short mode")
@@ -49,15 +49,15 @@ func TestConcurrentStressLogger(t *testing.T) {
 	t.Logf("Log file: %s", logger.Path())
 
 	const (
-		numGoroutines  = 100  // 并发协程数
-		logsPerRoutine = 1000 // 每个协程写入日志数
+		numGoroutines  = 100  // concurrent goroutines
+		logsPerRoutine = 1000 // log lines written per goroutine
 		totalExpected  = numGoroutines * logsPerRoutine
 	)
 
 	var wg sync.WaitGroup
 	start := time.Now()
 
-	// 启动并发写入
+	// start the concurrent writers
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
 		go func(id int) {
@@ -72,7 +72,7 @@ func TestConcurrentStressLogger(t *testing.T) {
 	logger.Flush()
 	elapsed := time.Since(start)
 
-	// 读取日志文件验证
+	// read the log file back to verify
 	data, err := os.ReadFile(logger.Path())
 	if err != nil {
 		t.Fatalf("failed to read log file: %v", err)
@@ -89,7 +89,7 @@ func TestConcurrentStressLogger(t *testing.T) {
 	t.Logf("  Duration: %v", elapsed)
 	t.Logf("  Throughput: %.2f logs/sec", float64(totalExpected)/elapsed.Seconds())
 
-	// 验证日志数量
+	// verify the line count
 	if actualCount < totalExpected/10 {
 		t.Errorf("too many logs lost: got %d, want at least %d (10%% of %d)",
 			actualCount, totalExpected/10, totalExpected)
@@ -97,7 +97,7 @@ func TestConcurrentStressLogger(t *testing.T) {
 	t.Logf("Successfully wrote %d/%d logs (%.1f%%)",
 		actualCount, totalExpected, float64(actualCount)/float64(totalExpected)*100)
 
-	// 验证日志格式（纯文本，无前缀）
+	// verify the format: plain text, no prefix
 	formatRE := regexp.MustCompile(`^goroutine-\d+-msg-\d+$`)
 	for i, line := range lines[:min(10, len(lines))] {
 		msg := stripTimestampPrefix(line)
@@ -107,7 +107,7 @@ func TestConcurrentStressLogger(t *testing.T) {
 	}
 }
 
-// TestConcurrentBurstLogger 突发流量测试
+// TestConcurrentBurstLogger -- bursty traffic test
 func TestConcurrentBurstLogger(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping burst test in short mode")
@@ -130,7 +130,7 @@ func TestConcurrentBurstLogger(t *testing.T) {
 	totalLogs := 0
 	start := time.Now()
 
-	// 模拟突发流量
+	// simulate a traffic burst
 	for burst := 0; burst < numBursts; burst++ {
 		var wg sync.WaitGroup
 		for i := 0; i < goroutinesPerBurst; i++ {
@@ -144,13 +144,13 @@ func TestConcurrentBurstLogger(t *testing.T) {
 			}(burst, i)
 		}
 		wg.Wait()
-		time.Sleep(10 * time.Millisecond) // 突发间隔
+		time.Sleep(10 * time.Millisecond) // gap between bursts
 	}
 
 	logger.Flush()
 	elapsed := time.Since(start)
 
-	// 验证
+	// verify
 	data, err := os.ReadFile(logger.Path())
 	if err != nil {
 		t.Fatalf("failed to read log file: %v", err)
@@ -174,7 +174,7 @@ func TestConcurrentBurstLogger(t *testing.T) {
 		actualCount, totalLogs, float64(actualCount)/float64(totalLogs)*100)
 }
 
-// TestLoggerChannelCapacity 测试 channel 容量极限
+// TestLoggerChannelCapacity -- push the channel to its capacity limit
 func TestLoggerChannelCapacity(t *testing.T) {
 	logger, err := NewLoggerWithSuffix("capacity")
 	if err != nil {
@@ -182,7 +182,7 @@ func TestLoggerChannelCapacity(t *testing.T) {
 	}
 	defer logger.Close()
 
-	const rapidLogs = 2000 // 超过 channel 容量 (1000)
+	const rapidLogs = 2000 // above the channel capacity (1000)
 
 	start := time.Now()
 	for i := 0; i < rapidLogs; i++ {
@@ -198,7 +198,7 @@ func TestLoggerChannelCapacity(t *testing.T) {
 	t.Logf("  Send duration: %v", sendDuration)
 	t.Logf("  Flush duration: %v", flushDuration)
 
-	// 验证仍有合理比例的日志写入（非阻塞模式允许部分丢失）
+	// a reasonable share must still land; non-blocking mode permits some loss
 	data, err := os.ReadFile(logger.Path())
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +212,7 @@ func TestLoggerChannelCapacity(t *testing.T) {
 	t.Logf("Logs persisted: %d/%d (%.1f%%)", actualCount, rapidLogs, float64(actualCount)/float64(rapidLogs)*100)
 }
 
-// TestLoggerMemoryUsage 内存使用测试
+// TestLoggerMemoryUsage -- memory usage under load
 func TestLoggerMemoryUsage(t *testing.T) {
 	logger, err := NewLoggerWithSuffix("memory")
 	if err != nil {
@@ -221,7 +221,7 @@ func TestLoggerMemoryUsage(t *testing.T) {
 	defer logger.Close()
 
 	const numLogs = 20000
-	longMessage := strings.Repeat("x", 500) // 500 字节长消息
+	longMessage := strings.Repeat("x", 500) // 500-byte message
 
 	start := time.Now()
 	for i := 0; i < numLogs; i++ {
@@ -230,14 +230,14 @@ func TestLoggerMemoryUsage(t *testing.T) {
 	logger.Flush()
 	elapsed := time.Since(start)
 
-	// 检查文件大小
+	// check the file size
 	info, err := os.Stat(logger.Path())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectedTotalSize := int64(numLogs * 500) // 理论最小总字节数
-	expectedMinSize := expectedTotalSize / 10 // 接受最多 90% 丢失
+	expectedTotalSize := int64(numLogs * 500) // theoretical minimum total bytes
+	expectedMinSize := expectedTotalSize / 10 // tolerate up to 90% loss
 	actualSize := info.Size()
 
 	t.Logf("Memory/disk usage test:")
@@ -253,7 +253,7 @@ func TestLoggerMemoryUsage(t *testing.T) {
 	}
 }
 
-// TestLoggerFlushTimeout 测试 Flush 超时机制
+// TestLoggerFlushTimeout -- the Flush timeout mechanism
 func TestLoggerFlushTimeout(t *testing.T) {
 	logger, err := NewLoggerWithSuffix("flush")
 	if err != nil {
@@ -261,12 +261,12 @@ func TestLoggerFlushTimeout(t *testing.T) {
 	}
 	defer logger.Close()
 
-	// 写入一些日志
+	// write some lines
 	for i := 0; i < 100; i++ {
 		logger.Info(fmt.Sprintf("test-log-%d", i))
 	}
 
-	// 测试 Flush 应该在合理时间内完成
+	// Flush must finish within a reasonable time
 	start := time.Now()
 	logger.Flush()
 	duration := time.Since(start)
@@ -278,7 +278,7 @@ func TestLoggerFlushTimeout(t *testing.T) {
 	}
 }
 
-// TestLoggerOrderPreservation 测试日志顺序保持
+// TestLoggerOrderPreservation -- per-goroutine ordering is preserved
 func TestLoggerOrderPreservation(t *testing.T) {
 	logger, err := NewLoggerWithSuffix("order")
 	if err != nil {
@@ -303,7 +303,7 @@ func TestLoggerOrderPreservation(t *testing.T) {
 	wg.Wait()
 	logger.Flush()
 
-	// 读取并验证每个 goroutine 的日志顺序
+	// read back and check each goroutine's ordering
 	data, err := os.ReadFile(logger.Path())
 	if err != nil {
 		t.Fatal(err)
@@ -324,7 +324,7 @@ func TestLoggerOrderPreservation(t *testing.T) {
 		sequences[gid] = append(sequences[gid], seq)
 	}
 
-	// 验证每个 goroutine 内部顺序
+	// verify ordering within each goroutine
 	for gid, seqs := range sequences {
 		for i := 0; i < len(seqs)-1; i++ {
 			if seqs[i] >= seqs[i+1] {

@@ -288,14 +288,16 @@ def main() -> int:
     except Exception as e:
         if stop_hook_active:
             sys.stderr.write(
-                "HARNESS: WARN — harness-tasks.json 无法解析且 stop_hook_active=True，"
-                "为避免无限循环，本次允许停止。\n"
+                "HARNESS: WARN — harness-tasks.json will not parse and stop_hook_active is "
+                "True. Allowing the stop rather than looping on a file we cannot read.\n"
             )
             return 0
         reason = (
-            "HARNESS: 检测到配置损坏，无法解析 harness-tasks.json。\n"
+            "HARNESS: the state file is corrupt — harness-tasks.json will not parse.\n"
             f"HARNESS: error={e}\n"
-            "按 SKILL.md 的 JSON corruption 恢复：优先用 harness-tasks.json.bak 还原；无法还原则停止并要求人工修复。"
+            "Recover per SKILL.md's JSON corruption procedure: restore from "
+            "harness-tasks.json.bak first; if that is not possible, stop and ask for a "
+            "human fix rather than writing a fresh file over the campaign's state."
         )
         print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
         return 0
@@ -439,7 +441,7 @@ def main() -> int:
             escalation = _escalation_notice(tid, tried)
 
     summary = (
-        "HARNESS: 未满足停止条件，继续执行。\n"
+        "HARNESS: stop conditions are not met. Continue.\n"
         + "HARNESS: "
         + " ".join(f"{k}={v}" for k, v in sorted(counts.items()))
         + f" total={len(tasks)}"
@@ -449,8 +451,9 @@ def main() -> int:
     reason = (
         summary
         + "\n"
-        + "请按 SKILL.md 的 Task Selection Algorithm 选择下一个 eligible 任务，并完整执行 Task Execution Cycle："
-        "Claim → Checkpoint → Validate → Record outcome → STATS（如需）→ Continue。"
+        + "Pick the next eligible task with SKILL.md's Task Selection Algorithm and run "
+        "the full Task Execution Cycle: Claim → Checkpoint → Validate → Record outcome "
+        "→ STATS (if needed) → Continue."
         + escalation
     )
 

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Self-reflection Stop hook — harness 任务循环完成后注入自省 prompt。
+"""Self-reflection Stop hook -- injects a review pass once the task loop is done.
 
-仅在以下条件同时满足时生效：
-  1. harness-tasks.json 存在（harness 曾被初始化）
-  2. .harness-active 不存在（harness 任务已全部完成）
+Fires only when both hold:
+  1. harness-tasks.json exists (the harness was initialised at some point)
+  2. .harness-active is gone (every task finished)
 
-当 harness 未曾启动时，本 hook 是完全的 no-op。
+Where the harness was never started, this hook is a complete no-op.
 
-配置:
-  - REFLECT_MAX_ITERATIONS 环境变量（默认 5）
-  - 设为 0 可禁用
+Config:
+  - REFLECT_MAX_ITERATIONS env var (default 5)
+  - Set it to 0 to disable
 """
 from __future__ import annotations
 
@@ -48,7 +48,8 @@ def _read_payload() -> dict[str, Any]:
 
 
 def _find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
-    """查找 harness-tasks.json 所在的目录。存在则说明 harness 曾被使用。"""
+    """Find the directory holding harness-tasks.json. Its presence means the
+    harness was used here at least once."""
     if hc is not None:
         return hc.find_harness_root(payload)
 
@@ -83,7 +84,7 @@ def _find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
 
 
 def _counter_path(session_id: str) -> Path:
-    """每个 session 独立计数文件。"""
+    """One counter file per session."""
     return Path(tempfile.gettempdir()) / f"claude-reflect-{session_id}"
 
 
@@ -104,13 +105,13 @@ def _write_counter(session_id: str, count: int) -> None:
 
 
 def _extract_original_prompt(transcript_path: str, max_bytes: int = 100_000) -> str:
-    """从 transcript JSONL 中提取第一条用户消息作为原始 prompt。"""
+    """Pull the first user message out of the transcript JSONL as the request."""
     try:
         p = Path(transcript_path)
         if not p.is_file():
             return ""
         with p.open("r", encoding="utf-8") as f:
-            # JSONL 格式，逐行解析找第一条 user message
+            # JSONL: parse line by line until the first user message
             for line in f:
                 line = line.strip()
                 if not line:
@@ -132,7 +133,7 @@ def _extract_original_prompt(transcript_path: str, max_bytes: int = 100_000) -> 
                 if role == "user":
                     content = message.get("content", entry.get("content", ""))
                     if isinstance(content, list):
-                        # content 可能是 list of blocks
+                        # content may be a list of blocks
                         texts = []
                         for block in content:
                             if isinstance(block, dict):
@@ -143,7 +144,7 @@ def _extract_original_prompt(transcript_path: str, max_bytes: int = 100_000) -> 
                                 texts.append(block)
                         content = "\n".join(texts)
                     if isinstance(content, str) and content.strip():
-                        # 截断过长的 prompt
+                        # truncate an over-long request
                         if len(content) > 2000:
                             content = content[:2000] + "..."
                         return content.strip()
@@ -156,12 +157,13 @@ def main() -> int:
     payload = _read_payload()
     session_id = payload.get("session_id", "")
     if not session_id:
-        return 0  # 无 session_id，放行
+        return 0  # no session_id, allow
 
-    # 守卫：仅当 harness 完成所有任务后（.harness-reflect 存在）才触发自省
-    # 这避免了两个问题：
-    #   1. 历史残留的 harness-tasks.json 导致误触发（false positive）
-    #   2. harness-stop.py 移除 .harness-active 后 Claude Code 跳过后续 hook（false negative）
+    # Gate: reflect only after the harness finished every task, which .harness-reflect
+    # marks. That marker exists to avoid two failures:
+    #   1. a leftover harness-tasks.json firing this on an unrelated session (false positive)
+    #   2. harness-stop.py removing .harness-active, after which Claude Code skips the
+    #      remaining hooks and the reflection never runs at all (false negative)
     root = _find_harness_root(payload)
     if root is None:
         return 0
@@ -178,20 +180,20 @@ def main() -> int:
             pass
         return 0
 
-    # 读取最大迭代次数
+    # Read the iteration ceiling
     try:
         max_iter = int(os.environ.get("REFLECT_MAX_ITERATIONS", DEFAULT_MAX_ITERATIONS))
     except (ValueError, TypeError):
         max_iter = DEFAULT_MAX_ITERATIONS
 
-    # 禁用
+    # Disabled
     if max_iter <= 0:
         return 0
 
-    # 读取当前计数
+    # Read the current count
     count = _read_counter(session_id)
 
-    # 超过最大次数，清理 marker 并放行
+    # Ceiling reached: clear the marker and allow the stop
     if count >= max_iter:
         try:
             (root / ".harness-reflect").unlink(missing_ok=True)
@@ -199,31 +201,31 @@ def main() -> int:
             pass
         return 0
 
-    # 递增计数
+    # Advance the count
     _write_counter(session_id, count + 1)
 
-    # 提取原始 prompt
+    # Pull the original request
     transcript_path = payload.get("transcript_path", "")
     original_prompt = _extract_original_prompt(transcript_path)
     last_message = payload.get("last_assistant_message", "")
     if last_message and len(last_message) > 3000:
         last_message = last_message[:3000] + "..."
 
-    # 构建自省 prompt
+    # Build the reflection prompt
     parts = [
-        f"[Self-Reflect] 迭代 {count + 1}/{max_iter} — 请在继续之前进行自省检查：",
+        f"[Self-Reflect] pass {count + 1}/{max_iter} -- review before going further:",
     ]
 
     if original_prompt:
-        parts.append(f"\n📋 原始请求：\n{original_prompt}")
+        parts.append(f"\n\nThe original request:\n{original_prompt}")
 
     parts.append(
-        "\n🔍 自省清单："
-        "\n1. 对照原始请求，逐项确认每个需求点是否已完整实现"
-        "\n2. 检查是否有遗漏的边界情况、错误处理或异常场景"
-        "\n3. 代码质量：是否有可以改进的地方（可读性、性能、安全性）"
-        "\n4. 是否需要补充测试或文档"
-        "\n5. 最终确认：所有改动是否一致且不互相冲突"
+        "\n\nChecklist:"
+        "\n1. Against the original request, confirm each requirement point by point."
+        "\n2. Look for edge cases, error handling, or failure paths that were skipped."
+        "\n3. Code quality: readability, performance, security -- anything worth fixing?"
+        "\n4. Do the changes need tests or documentation they do not have?"
+        "\n5. Final check: are the changes consistent with each other, and with the repo?"
         "\n\nFound something? Fix it and this checklist runs again."
         "\n**Nothing left? Summarise what was done and end that summary with the line "
         f"`{DONE_SENTINEL}` on its own.** That is what ends the loop -- without it this "

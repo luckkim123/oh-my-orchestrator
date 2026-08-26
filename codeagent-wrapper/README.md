@@ -1,6 +1,5 @@
 # codeagent-wrapper
 
-[English](README.md) | [中文](README_CN.md)
 
 A multi-backend AI code agent CLI wrapper written in Go. Provides a unified CLI entry point wrapping different AI tool backends (Codex / Claude / Gemini / OpenCode) with consistent flags, configuration, skill injection, and session resumption.
 

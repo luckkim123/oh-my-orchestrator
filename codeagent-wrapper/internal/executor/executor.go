@@ -578,7 +578,7 @@ func ExecuteConcurrentWithContext(parentCtx context.Context, layers [][]TaskSpec
 						res.LogPath = taskLogPath
 					}
 				}
-				// 只有当最终的 LogPath 确实是共享 logger 的路径时才标记为 shared
+				// Mark it shared only when the final LogPath really is the shared logger's path
 				if handle.shared && handle.logger != nil && res.LogPath == handle.logger.Path() {
 					res.SharedLog = true
 				}

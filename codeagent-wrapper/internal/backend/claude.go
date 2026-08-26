@@ -41,10 +41,12 @@ type MinimalClaudeSettings struct {
 	Model string
 }
 
-// LoadMinimalClaudeSettings 从 ~/.claude/settings.json 只提取安全的最小子集：
-// - env: 只接受字符串类型的值
-// - model: 只接受字符串类型的值
-// 文件缺失/解析失败/超限都返回空。
+// LoadMinimalClaudeSettings pulls only the safe minimum out of
+// ~/.claude/settings.json:
+//   - env: string values only
+//   - model: string values only
+//
+// A missing file, a parse failure, or an over-size file all return empty.
 func LoadMinimalClaudeSettings() MinimalClaudeSettings {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {

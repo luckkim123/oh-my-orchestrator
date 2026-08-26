@@ -1086,7 +1086,7 @@ func TestExecutorSharedLogFalseWhenCustomLogPath(t *testing.T) {
 
 	tempDir := setTempDirEnv(t, t.TempDir())
 
-	// Setup: 创建主 logger
+	// Setup: create the main logger
 	mainLogger, err := NewLoggerWithSuffix("shared-main")
 	if err != nil {
 		t.Fatalf("NewLoggerWithSuffix() error = %v", err)
@@ -1097,9 +1097,9 @@ func TestExecutorSharedLogFalseWhenCustomLogPath(t *testing.T) {
 		_ = os.Remove(mainLogger.Path())
 	}()
 
-	// 模拟场景：task logger 创建失败（通过设置只读的 TMPDIR），
-	// 回退到主 logger（handle.shared=true），
-	// 但 runCodexTaskFn 返回自定义的 LogPath（不等于主 logger 的路径）
+	// Scenario: creating the task logger fails (a read-only TMPDIR), so it falls
+	// back to the main logger (handle.shared=true), while runCodexTaskFn returns a
+	// custom LogPath that is not the main logger's path
 	notDir := filepath.Join(tempDir, "not-a-dir")
 	if err := os.WriteFile(notDir, []byte("x"), 0o644); err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
@@ -1109,7 +1109,7 @@ func TestExecutorSharedLogFalseWhenCustomLogPath(t *testing.T) {
 	orig := runCodexTaskFn
 	customLogPath := "/custom/path/to.log"
 	runCodexTaskFn = func(task TaskSpec, timeout int) TaskResult {
-		// 返回自定义 LogPath，不等于主 logger 的路径
+		// return a custom LogPath, different from the main logger's
 		return TaskResult{
 			TaskID:   task.ID,
 			ExitCode: 0,
@@ -1118,7 +1118,7 @@ func TestExecutorSharedLogFalseWhenCustomLogPath(t *testing.T) {
 	}
 	defer func() { runCodexTaskFn = orig }()
 
-	// 执行任务
+	// run the task
 	results := executeConcurrentWithContext(context.Background(), [][]TaskSpec{{{ID: "task1"}}}, 1, 0)
 
 	if len(results) != 1 {
@@ -1131,7 +1131,7 @@ func TestExecutorSharedLogFalseWhenCustomLogPath(t *testing.T) {
 		t.Fatalf("did not expect shared marker when LogPath differs from shared logger, got: %s", out)
 	}
 
-	// 验证 LogPath 确实是自定义的
+	// verify LogPath really is the custom one
 	if res.LogPath != customLogPath {
 		t.Fatalf("expected custom LogPath %s, got %s", customLogPath, res.LogPath)
 	}
