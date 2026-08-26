@@ -65,6 +65,16 @@ only seam to Orca and it is one-directional. Do not mirror Orca state into the b
 the harness has to run without Orca, and a hook that needs a live Orca runtime to
 evaluate the gate hard-fails on any machine that does not have one.
 
+## Campaign Layer
+
+A campaign is many workers on one board. Its protocol — the six-line launch proposal,
+the five post categories with globally monotonic numbering, the two memory layers,
+the worker brief, reporting-as-termination, worker reuse, and the cost ledger — is in
+`references/campaign-protocol.md`. Every rule there was paid for by an incident.
+
+The boundary with Orca, and why the board does not mirror its state:
+`references/orca-boundary.md`.
+
 ## Enforcement Surface
 
 Measured on claude 2.1.239. The design that assumed spawn-time blocking does not
