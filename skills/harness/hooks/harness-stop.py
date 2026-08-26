@@ -158,6 +158,43 @@ def _reset_block_counter(root: Path) -> None:
         pass
 
 
+def _validation_command(t: dict[str, Any]) -> str:
+    v = t.get("validation")
+    if not isinstance(v, dict):
+        return ""
+    return str(v.get("command") or "").strip()
+
+
+def _integrity_failures(tasks: list[dict[str, Any]]) -> list[str]:
+    """Completion claims the file cannot back up.
+
+    Premature completion is the harness's named #1 failure mode, and the skill
+    already says not to declare it without an objective check. Prose the model may
+    follow is not a rule -- this is the same gap the 3-strike count had. A task
+    marked completed with no validation command is a claim with nothing behind it.
+
+    started_at_commit is the other half: without it there is no commit to reset to,
+    so a failure has no rollback and the tree keeps whatever the attempt left.
+    """
+    failures: list[str] = []
+    for t in tasks:
+        tid = str(t.get("id") or "?")
+        status = str(t.get("status") or "")
+        if status == "completed" and not _validation_command(t):
+            failures.append(
+                f"[{tid}] is completed with no validation.command. Either add the "
+                "command and run it, or set the task back to failed. A completion "
+                "nothing can check is not a completion."
+            )
+        if status == "in_progress" and not str(t.get("started_at_commit") or "").strip():
+            failures.append(
+                f"[{tid}] is in_progress with no started_at_commit. There is no commit "
+                "to reset to, so this task cannot be rolled back if it fails. Record "
+                "the base commit now, before the work goes further."
+            )
+    return failures
+
+
 def _escalation_notice(task_id: str, tried: int) -> str:
     """The 3-strike rule, stated as a requirement rather than left to judgment.
 
@@ -297,6 +334,23 @@ def main() -> int:
         ]
     else:
         in_progress_blocking = in_progress_any
+
+    # Campaign contract only. A legacy harness-tasks.json root predates these
+    # fields, and turning every task without them into a blocker would fire on
+    # boards that simply do not use them -- the false-positive class that gets a
+    # hook switched off. The seeded board ships both fields, so a campaign has
+    # them from the start.
+    on_board = bool(hc) and hc.board_path(root).is_file()
+    integrity = _integrity_failures(tasks) if on_board else []
+    if integrity and not stop_hook_active:
+        emit_reason = (
+            "HARNESS: completion criteria are not backed by anything runnable.\n"
+            + "\n".join(f"  - {f}" for f in integrity)
+            + "\n\nSKILL.md, Task Execution Cycle step 3: do not declare completion "
+            "without an objective check."
+        )
+        print(json.dumps({"decision": "block", "reason": emit_reason}, ensure_ascii=False))
+        return 0
 
     # If nothing left to do, allow stop
     if not pending_eligible and not retryable and not in_progress_blocking:

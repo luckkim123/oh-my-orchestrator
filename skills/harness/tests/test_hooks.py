@@ -873,6 +873,66 @@ class TestSelfReflectStopHook(unittest.TestCase):
         self.assertEqual(data["decision"], "block")
 
 
+class TestCompletionIntegrity(unittest.TestCase):
+    """A completion claim the file cannot back up is not a completion."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.root = Path(self.tmpdir)
+        (self.root / "harness-progress.txt").write_text("")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _payload(self, **extra):
+        return {"cwd": self.tmpdir, **extra}
+
+    def test_completed_without_validation_blocks(self):
+        write_board(self.root, [
+            {"id": "t1", "status": "completed", "validation": {"command": None}},
+        ])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        data = json.loads(stdout)
+        self.assertEqual(data["decision"], "block")
+        self.assertIn("no validation.command", data["reason"])
+
+    def test_completed_with_validation_allows(self):
+        write_board(self.root, [
+            {"id": "t1", "status": "completed",
+             "validation": {"command": "pytest -q", "timeout_seconds": 300}},
+        ])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+
+    def test_in_progress_without_base_commit_blocks(self):
+        write_board(self.root, [
+            {"id": "t1", "status": "in_progress", "started_at_commit": None,
+             "validation": {"command": "pytest -q"}},
+        ])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        data = json.loads(stdout)
+        self.assertIn("no started_at_commit", data["reason"])
+
+    def test_legacy_root_is_not_held_to_the_campaign_contract(self):
+        """harness-tasks.json predates these fields; do not retrofit a blocker."""
+        write_tasks(self.root, [
+            {"id": "t1", "status": "completed"},
+        ])
+        activate(self.root)
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+
+    def test_stop_hook_active_lets_it_through(self):
+        write_board(self.root, [
+            {"id": "t1", "status": "completed", "validation": {"command": None}},
+        ])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload(stop_hook_active=True))
+        self.assertNotIn("no validation.command", stdout)
+
+
 class TestSubagentStartHook(unittest.TestCase):
     """SubagentStart injects and observes. It cannot block -- measured, 2.1.239."""
 

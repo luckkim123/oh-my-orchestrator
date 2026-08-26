@@ -97,6 +97,21 @@ intact; 10,400 are truncated to a 2KB preview and spilled to a file the subagent
 has to go read. The hook caps at 10,000 and drops role memory before it drops a
 mismatch notice.
 
+### Completion has to be runnable
+
+Enforced on board-backed campaigns only. The Stop hook holds the turn when:
+
+- a task is `completed` with no `validation.command` — a completion nothing can
+  check is not a completion, and premature completion is this harness's named #1
+  failure mode;
+- a task is `in_progress` with no `started_at_commit` — there is no commit to reset
+  to, so a failure has no rollback and the tree keeps whatever the attempt left.
+
+A legacy `harness-tasks.json` root is not held to this. Those boards predate the
+fields, and turning every task without them into a blocker fires on projects that
+simply do not use them. The seeded board ships both, so a campaign has them from
+task one.
+
 ### What a worker owes before it stops
 
 Enforced only against a **declared roster**. An empty `workers[]` means the campaign
