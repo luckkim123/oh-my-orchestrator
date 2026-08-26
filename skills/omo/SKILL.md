@@ -71,6 +71,19 @@ Routing-first, not an `explore → oracle → develop` conveyor belt.
 Skip `oracle` when the change is local and low-risk. Line count is a weak signal;
 open tradeoffs are the real gate.
 
+## Shared Context
+
+A vendor CLI does not inherit your session rules. It gets them from
+`.orchestration/`, loaded on the vendor's side by a `context-loader` skill attached
+to its own session config -- not from your prompt, which is truncatable.
+
+Before the first vendor call in a project, check that `.orchestration/rules/` exists
+and that the vendor's loader is installed. If it is not, say so: the consultation
+still works, but the worker is a stranger answering questions rather than a worker
+under this project's rules, and you weigh its answer accordingly.
+
+Setup, layout, write permissions, and per-project pruning: `references/shared-context.md`.
+
 ## Vendor Invocation Format
 
 ```bash

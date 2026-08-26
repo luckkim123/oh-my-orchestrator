@@ -1,0 +1,18 @@
+{
+  "_comment": "Merge the deny block into the project .claude/settings.json used by claude-backend workers. deny wins over allow, so this holds regardless of what the surrounding settings permit. The allow list is deliberately absent: it belongs to whatever renders the project's own settings.",
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Read(./**/credentials*)",
+      "Read(./**/*secret*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gcloud/**)",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~)"
+    ]
+  }
+}

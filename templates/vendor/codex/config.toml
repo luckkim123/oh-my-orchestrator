@@ -1,0 +1,22 @@
+# Codex CLI project configuration.
+# Copy to <project>/.codex/config.toml.
+#
+# The [[skills.config]] block is the point of this file: it attaches context-loader
+# to the Codex *session*, so the shared rules load on every task. Passing them in the
+# prompt instead makes them a per-call payload that a truncated prompt drops.
+
+model = "gpt-5.2-codex"
+model_reasoning_effort = "high"
+model_reasoning_summary = "detailed"
+
+approval_policy = "on-request"
+
+# Reasoning goes to stderr and buries real errors in the wrapper's logs.
+hide_agent_reasoning = true
+
+[features]
+skills = true
+
+[[skills.config]]
+enabled = true
+path = ".codex/skills/context-loader"
