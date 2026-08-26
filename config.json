@@ -37,7 +37,7 @@
       ]
     },
     "omo": {
-      "enabled": false,
+      "enabled": true,
       "description": "OmO multi-agent orchestration with Sisyphus coordinator",
       "agents": {
         "oracle": {
@@ -127,7 +127,7 @@
       ]
     },
     "do": {
-      "enabled": true,
+      "enabled": false,
       "description": "5-phase feature development workflow with codeagent orchestration",
       "agents": {
         "develop": {
@@ -197,7 +197,7 @@
       ]
     },
     "harness": {
-      "enabled": false,
+      "enabled": true,
       "description": "Multi-session autonomous agent harness with progress checkpointing, failure recovery, task dependencies, and post-completion self-reflection",
       "operations": [
         {

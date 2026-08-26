@@ -1235,23 +1235,6 @@ def write_status(results: List[Dict[str, Any]], ctx: Dict[str, Any]) -> None:
         json.dump(status, fh, indent=2, ensure_ascii=False)
 
 
-def install_default_configs(ctx: Dict[str, Any]) -> None:
-    """Copy default config files if they don't already exist. Best-effort: never raises."""
-    try:
-        install_dir = ctx["install_dir"]
-        config_dir = ctx["config_dir"]
-
-        # Copy memorys/CLAUDE.md -> {install_dir}/CLAUDE.md
-        claude_md_src = config_dir / "memorys" / "CLAUDE.md"
-        claude_md_dst = install_dir / "CLAUDE.md"
-        if not claude_md_dst.exists() and claude_md_src.exists():
-            shutil.copy2(claude_md_src, claude_md_dst)
-            print(f"  Installed CLAUDE.md to {claude_md_dst}")
-            write_log({"level": "INFO", "message": f"Installed CLAUDE.md to {claude_md_dst}"}, ctx)
-    except Exception as exc:
-        print(f"  Warning: could not install default configs: {exc}", file=sys.stderr)
-
-
 def print_post_install_info(ctx: Dict[str, Any]) -> None:
     """Print post-install verification and setup guidance."""
     install_dir = ctx["install_dir"]
@@ -1444,7 +1427,6 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         failed = len(results) - success
         if failed == 0:
             print(f"\n✓ Update complete: {success} module(s) updated")
-            install_default_configs(ctx)
             print_post_install_info(ctx)
         else:
             print(f"\n⚠ Update finished with errors: {success} success, {failed} failed")
@@ -1461,7 +1443,6 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             return 1
         result = interactive_manage(config, ctx)
         if result == 0 and ctx.get("_did_install"):
-            install_default_configs(ctx)
             print_post_install_info(ctx)
         return result
 
@@ -1523,7 +1504,6 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             return 1
 
     if failed == 0:
-        install_default_configs(ctx)
         print_post_install_info(ctx)
 
     return 0
