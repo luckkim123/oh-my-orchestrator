@@ -12,7 +12,6 @@
     ".claude-plugin/",
     "agents/",
     "skills/",
-    "memorys/",
     "templates/",
     "codeagent-wrapper/",
     "config.json",
@@ -21,7 +20,6 @@
     "install.bat",
     "PLUGIN_README.md",
     "README.md",
-    "README_CN.md",
     "LICENSE"
   ]
 }

@@ -1,171 +1,98 @@
-[中文](README_CN.md) [English](README.md)
+# oh-my-orchestrator
 
-# Claude Code Multi-Agent Workflow System
-
-[![Run in Smithery](https://smithery.ai/badge/skills/stellarlinkco)](https://smithery.ai/skills?ns=stellarlinkco&utm_source=github&utm_medium=badge)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Claude Code](https://img.shields.io/badge/Claude-Code-blue)](https://claude.ai/code)
-[![Version](https://img.shields.io/badge/Version-6.x-green)](https://github.com/stellarlinkco/myclaude)
 
-> AI-powered development automation with multi-backend execution (Codex/Claude/Gemini/OpenCode)
+> A multi-vendor orchestration harness where **the main Claude Code session is the
+> executor** and vendor CLIs are role-scoped advisors.
 
-## Quick Start
+## What this is for
+
+Running several AI agents on one task is easy. Making them follow rules is not.
+Prose conventions ("report before you go idle", "record what it cost") are not
+enforced by anything, so they quietly stop being true.
+
+This harness puts the rules where they can actually fire:
+
+- **One board.** `.orchestration/board.json` is the only state hooks read, and
+  its `status` field is the gate — when a campaign is closed, every hook exits 0
+  immediately. `HUB.md` beside it is the prose humans read.
+- **One enforcement layer.** A `SubagentStop` hook rejects a worker that never
+  filed its role notes or never reported. Rejection is `exit 2` — measured as the
+  only code Claude Code treats as blocking.
+- **Completion you can run.** A task finishes when its `validation.command`
+  passes, not when someone says it did; a failure rolls back to
+  `started_at_commit`.
+
+## How delegation is decided
+
+Upstream `omo` forbids the orchestrator from writing code. This fork inverts
+that: **Claude writes the code, and delegation needs a reason.**
+
+| Reason to delegate | Why |
+|---|---|
+| The same approach failed twice | Escape a 3-strike loop with a different model, not a different prompt |
+| A read would blow the context budget | Bulk sweeps belong in a subordinate context |
+| The verdict turns on perspective diversity | Adversarial review needs an independent reader |
+
+Vendor workers **gather, investigate, and rebut**. Judgment, generation, and
+file writes stay with the calling lane — citation generation, document integrity
+gates, and experiment SSOTs are never delegated.
+
+## Status
+
+Early. Phase 0 (hook-surface measurement) is done and it changed the design:
+`SubagentStart` cannot block a spawn, and `TeammateIdle` never fires for
+Agent-tool subagents, so enforcement lives entirely on `SubagentStop`. Phases 1–5
+are in progress.
+
+## Modules
+
+| Module | What it does |
+|---|---|
+| `skills/omo` | Role-scoped vendor orchestration and the delegation gate |
+| `skills/harness` | The enforcement layer: blocking checks, safety valve, claim locks |
+
+Other upstream modules (`bmad`, `requirements`, `sparv`, `do`, `course`,
+`dev-kit`, `claudekit`) ship disabled in `config.json`. Their directories are
+kept so `git fetch upstream` keeps working — they are not deleted.
+
+## Install
 
 ```bash
-npx github:stellarlinkco/myclaude
+python3 install.py
 ```
 
-## Modules Overview
+Edit `config.json` to change which modules are enabled. Only `omo` and `harness`
+are on by default.
 
-| Module | Description | Documentation |
-|--------|-------------|---------------|
-| [do](skills/do/README.md) | **Recommended** - 5-phase feature development with codeagent orchestration | `/do` command |
-| [omo](skills/omo/README.md) | Multi-agent orchestration with intelligent routing | `/omo` command |
-| [bmad](agents/bmad/README.md) | BMAD agile workflow with 6 specialized agents | `/bmad-pilot` command |
-| [requirements](agents/requirements/README.md) | Lightweight requirements-to-code pipeline | `/requirements-pilot` command |
-| [essentials](agents/development-essentials/README.md) | 11 core dev commands: ask, bugfix, code, debug, docs, enhance-prompt, optimize, refactor, review, test, think | `/code`, `/debug`, etc. |
-| [sparv](skills/sparv/README.md) | SPARV workflow (Specify→Plan→Act→Review→Vault) | `/sparv` command |
-| course | Course development (combines dev + product-requirements + test-cases) | Composite module |
-| claudekit | ClaudeKit: do skill + global hooks (pre-bash, inject-spec, log-prompt) | Composite module |
+## Backend CLIs
 
-### Available Skills
+| Backend | Invocation | Notes |
+|---|---|---|
+| Codex | `codex exec --sandbox read-only "<prompt>" < /dev/null` | `--full-auto` does not exist. Close stdin or it waits 3s |
+| Antigravity | `agy --print-timeout 45s --print='<prompt>' < /dev/null` | Binary is `agy`, not `antigravity`. Attach the prompt to `--print=` or the next flag is eaten as the prompt |
+| Claude | `--output-format stream-json`, `-r` | |
+| Gemini | `-o stream-json`, `-y`, `-r` | |
 
-Individual skills can be installed separately via `npx github:stellarlinkco/myclaude --list` (skills bundled in modules like do, omo, sparv are listed above):
+An invalid `--model` is not rejected by the CLI — it fails as an API 400. Catch it.
 
-| Skill | Description |
-|-------|-------------|
-| browser | Browser automation for web testing and data extraction |
-| codeagent | codeagent-wrapper invocation for multi-backend AI code tasks |
-| codex | Direct Codex backend execution |
-| dev | Lightweight end-to-end development workflow |
-| gemini | Direct Gemini backend execution |
-| product-requirements | Interactive PRD generation with quality scoring |
-| prototype-prompt-generator | Structured UI/UX prototype prompt generation |
-| skill-install | Install skills from GitHub with security scanning |
-| test-cases | Comprehensive test case generation from requirements |
+## Credits and license
 
-## Installation
+Forked from [stellarlinkco/myclaude](https://github.com/stellarlinkco/myclaude)
+(AGPL-3.0) at `f2e75c1`, which supplies the enforcement layer, the role axis, and
+the vendor assignment table.
 
-```bash
-# Interactive installer (recommended)
-npx github:stellarlinkco/myclaude
+Design ideas adapted — not code — from
+[gaebalai/claude-code-orchestrator](https://github.com/gaebalai/claude-code-orchestrator)
+(MIT): the delegation flowchart ("two failures → a different vendor"), the
+`NOT Your Job` vendor boundary, the vendor CLI failure-mode tables, reasoning
+effort tiering, and cross-vendor decision records.
 
-# List installable items (modules / skills / wrapper)
-npx github:stellarlinkco/myclaude --list
+The campaign protocol (post categories, role memory, "reporting is termination",
+estimated-vs-actual cost) comes from a `team-project` skill that this harness
+absorbs.
 
-# Detect installed modules and update from GitHub
-npx github:stellarlinkco/myclaude --update
-
-# Custom install directory / overwrite
-npx github:stellarlinkco/myclaude --install-dir ~/.claude --force
-```
-
-`--update` detects already installed modules in the target install dir (defaults to `~/.claude`, via `installed_modules.json` when present) and updates them from GitHub (latest release) by overwriting the module files.
-
-### Module Configuration
-
-Edit `config.json` to enable/disable modules:
-
-```json
-{
-  "modules": {
-    "bmad": { "enabled": false },
-    "requirements": { "enabled": false },
-    "essentials": { "enabled": false },
-    "omo": { "enabled": false },
-    "sparv": { "enabled": false },
-    "do": { "enabled": true },
-    "course": { "enabled": false }
-  }
-}
-```
-
-## Workflow Selection Guide
-
-| Scenario | Recommended |
-|----------|-------------|
-| Feature development (default) | `/do` |
-| Bug investigation + fix | `/omo` |
-| Large enterprise project | `/bmad-pilot` |
-| Quick prototype | `/requirements-pilot` |
-| Simple task | `/code`, `/debug` |
-
-## Core Architecture
-
-| Role | Agent | Responsibility |
-|------|-------|----------------|
-| **Orchestrator** | Claude Code | Planning, context gathering, verification |
-| **Executor** | codeagent-wrapper | Code editing, test execution (Codex/Claude/Gemini/OpenCode) |
-
-## Backend CLI Requirements
-
-| Backend | Required Features |
-|---------|-------------------|
-| Codex | `codex e`, `--json`, `-C`, `resume` |
-| Claude | `--output-format stream-json`, `-r` |
-| Gemini | `-o stream-json`, `-y`, `-r` |
-| OpenCode | `opencode`, stdin mode |
-
-## Directory Structure After Installation
-
-```
-~/.claude/
-├── bin/codeagent-wrapper
-├── CLAUDE.md              (installed by default)
-├── commands/              (from essentials module)
-├── agents/                (from bmad/requirements modules)
-├── skills/                (from do/omo/sparv/course modules)
-├── hooks/                 (from claudekit module)
-├── settings.json          (auto-generated, hooks config)
-└── installed_modules.json (auto-generated, tracks modules)
-```
-
-## Documentation
-
-- [codeagent-wrapper](codeagent-wrapper/README.md)
-- [Plugin System](PLUGIN_README.md)
-
-## Troubleshooting
-
-### Common Issues
-
-**Codex wrapper not found:**
-```bash
-# Select: codeagent-wrapper
-npx github:stellarlinkco/myclaude
-```
-
-**Module not loading:**
-```bash
-cat ~/.claude/installed_modules.json
-npx github:stellarlinkco/myclaude --force
-```
-
-**Backend CLI errors:**
-```bash
-which codex && codex --version
-which claude && claude --version
-which gemini && gemini --version
-```
-
-## FAQ
-
-| Issue | Solution |
-|-------|----------|
-| "Unknown event format" | Logging display issue, can be ignored |
-| Gemini can't read .gitignore files | Remove from .gitignore or use different backend |
-| Codex permission denied | Set `approval_policy = "never"` in ~/.codex/config.yaml |
-
-See [GitHub Issues](https://github.com/stellarlinkco/myclaude/issues) for more.
-
-## License
-
-AGPL-3.0 - see [LICENSE](LICENSE)
-
-### Commercial Licensing
-
-For commercial use without AGPL obligations, contact: support@stellarlink.co
-
-## Support
-
-- [GitHub Issues](https://github.com/stellarlinkco/myclaude/issues)
+**AGPL-3.0** — see [LICENSE](LICENSE). Because this repository is AGPL, its code
+must not be copied into MIT-licensed repositories; calling and referencing are
+fine.
