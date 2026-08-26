@@ -42,17 +42,15 @@
       "agents": {
         "oracle": {
           "backend": "claude",
-          "model": "claude-opus-4-5-20251101",
+          "model": "claude-opus-5",
+          "reasoning": "high",
           "yolo": true
         },
-        "librarian": {
-          "backend": "claude",
-          "model": "claude-sonnet-4-5-20250929",
-          "yolo": true
-        },
-        "explore": {
-          "backend": "opencode",
-          "model": "opencode/grok-code"
+        "security": {
+          "backend": "codex",
+          "model": "gpt-5.2",
+          "reasoning": "xhigh",
+          "yolo": false
         },
         "develop": {
           "backend": "codex",
@@ -60,13 +58,29 @@
           "reasoning": "xhigh",
           "yolo": true
         },
+        "librarian": {
+          "backend": "claude",
+          "model": "claude-sonnet-5",
+          "reasoning": "medium",
+          "yolo": true
+        },
+        "explore": {
+          "backend": "codex",
+          "model": "gpt-5.2",
+          "reasoning": "low",
+          "yolo": false
+        },
         "frontend-ui-ux-engineer": {
-          "backend": "gemini",
-          "model": "gemini-3-pro-preview"
+          "backend": "claude",
+          "model": "claude-sonnet-5",
+          "reasoning": "medium",
+          "yolo": true
         },
         "document-writer": {
-          "backend": "gemini",
-          "model": "gemini-3-flash-preview"
+          "backend": "claude",
+          "model": "claude-sonnet-5",
+          "reasoning": "medium",
+          "yolo": true
         }
       },
       "operations": [

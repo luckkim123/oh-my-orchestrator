@@ -2,6 +2,11 @@
 
 > Last verified: YYYY-MM-DD against version x.y.z
 
+<!-- Before relying on this file, compare the version above to what is installed.
+     Differ -> the file is a lead, not a fact: verify the claim you need and update
+     the banner in the same pass. A bumped banner without a re-run check turns an
+     old fact into a fresh lie. Stale entries get a banner, never deletion. -->
+
 ## Basics
 
 | Field | Value |

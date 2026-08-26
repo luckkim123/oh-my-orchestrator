@@ -102,6 +102,37 @@ instruction teaches the worker that the rules are noise.
 domain rules, delete the file rather than shipping the placeholder: an empty rule
 reads as "no rules here", which is a different claim from "not written yet".
 
+## Knowledge goes stale, and nothing notices on its own
+
+A store with no re-check verb accumulates confident wrong answers. The symptom is
+visible in the sibling harnesses: an observation sat at `stuck_candidate` for 75 days
+because nothing ever asked whether it still held.
+
+The fix here is a rule, not a tool. Every `knowledge/libraries/<name>.md` opens with
+
+```
+> Last verified: YYYY-MM-DD against version x.y.z
+```
+
+**Before relying on one of these files, compare that version to what is installed.**
+If they differ, the file is suspect: use it as a lead, verify the specific claim you
+need, and update the banner in the same pass. If they match, the file stands.
+
+Three rules keep this from rotting:
+
+1. **A stale entry gets bannered, never deleted.** `> (stale as of YYYY-MM-DD: <what
+   changed>)` at the top. Deletion loses the record that someone checked; the next
+   reader re-derives it from scratch.
+2. **Re-verification is part of the task that needed the file,** not a separate
+   cleanup someone will do later. "Distill later" measured at zero follow-through,
+   and so does "re-check later".
+3. **A version bump alone is not verification.** Bumping the banner without
+   re-running the check that produced the claim converts an old fact into a fresh
+   lie.
+
+Research notes under `knowledge/research/` carry the same banner and the same rule.
+Their staleness clock is the source's publication date, not a package version.
+
 ## Vendor worker permissions
 
 `templates/orchestration/settings/worker-permissions.json` carries an 11-entry

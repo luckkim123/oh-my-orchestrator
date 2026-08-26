@@ -66,6 +66,7 @@ Routing-first, not an `explore → oracle → develop` conveyor belt.
 | Risky change *and* the tradeoff is genuinely open: multi-module, public API, data format, concurrency, security/perf | `oracle` |
 | Two failed attempts at the same fix (ground 1) | `oracle`, then a different vendor for the retry |
 | Authored work that needs a judge who did not write it (ground 3) | `oracle` (review mode) |
+| Trust boundary, authn/authz, secrets, or unsafe defaults touched | `security` |
 | Implementation you have a stated ground to hand off | `develop` / `frontend-ui-ux-engineer` / `document-writer` |
 
 Skip `oracle` when the change is local and low-risk. Line count is a weak signal;
@@ -87,6 +88,11 @@ Setup, layout, write permissions, and per-project pruning: `references/shared-co
 When a design question gets settled -- by you or by a vendor -- record it without
 being asked: `references/decision-record.md`. A decision written nowhere gets
 re-argued and eventually answered differently.
+
+When a domain harness is running -- a paper, a document, an experiment, a project's
+governance -- what a vendor may be handed narrows: it gathers and rebuts, the lane
+judges and writes the artifact. Boundary and per-project pruning:
+`references/lane-boundary.md`.
 
 ## Vendor Invocation Format
 
@@ -229,3 +235,4 @@ requires — and closes with `## NOT Your Job` — what it must hand back to you
 | `frontend-ui-ux-engineer` | UI/styling implementation, same condition |
 | `document-writer` | Documentation writing, same condition |
 | `librarian` | External library behavior you cannot verify from the repo |
+| `security` | A security review, which is ground 3 by construction — the author cannot audit their own trust boundaries |
