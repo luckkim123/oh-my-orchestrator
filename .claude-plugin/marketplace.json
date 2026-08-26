@@ -9,6 +9,13 @@
   },
   "plugins": [
     {
+      "name": "orchestrator",
+      "description": "Explicit entry point for multi-vendor campaigns on a tracked board. The execution layer -- composes omo and harness; not a domain lane.",
+      "version": "0.1.0",
+      "source": "./skills/orchestrator",
+      "category": "development"
+    },
+    {
       "name": "omo",
       "description": "Role-scoped vendor orchestration. Claude is the default executor; delegation needs a reason (two failed attempts, context budget, adversarial verification).",
       "version": "0.1.0",

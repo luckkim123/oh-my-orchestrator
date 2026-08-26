@@ -50,6 +50,7 @@ are in progress.
 
 | Module | What it does |
 |---|---|
+| `skills/orchestrator` | Explicit entry point for a multi-vendor campaign. Composes the two below |
 | `skills/omo` | Role-scoped vendor orchestration and the delegation gate |
 | `skills/harness` | The enforcement layer: blocking checks, safety valve, claim locks |
 | `templates/orchestration/` | Seeds a project's `.orchestration/` shared knowledge store |
