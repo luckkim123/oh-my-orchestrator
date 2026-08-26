@@ -1,0 +1,92 @@
+{
+  "name": "oh-my-orchestrator",
+  "version": "0.1.0",
+  "description": "Multi-vendor orchestration harness. The Claude session executes; vendor CLIs advise by role on a tracked .orchestration/ board with enforcement on SubagentStop.",
+  "author": {
+    "name": "kimseungmin"
+  },
+  "license": "AGPL-3.0",
+  "keywords": [
+    "claude-code",
+    "plugin",
+    "orchestration",
+    "multi-agent",
+    "multi-vendor",
+    "codex",
+    "campaign",
+    "harness"
+  ],
+  "skills": [
+    "./skills/orchestrator/",
+    "./skills/omo/",
+    "./skills/harness/"
+  ],
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/harness/hooks/harness-stop.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/harness/hooks/self-reflect-stop.py\"",
+            "timeout": 15,
+            "statusMessage": "Self-reflecting on task completion..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/harness/hooks/harness-sessionstart.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/harness/hooks/harness-teammateidle.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/harness/hooks/harness-subagentstart.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/harness/hooks/harness-subagentstop.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
