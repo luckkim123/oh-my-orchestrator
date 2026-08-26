@@ -221,6 +221,26 @@ Then pick the next task in this priority order:
 2. Tasks with `status: "failed"` where `attempts < max_attempts` and ALL `depends_on` are `completed` — sorted by priority, then oldest failure first
 3. If no eligible tasks remain → log final STATS → STOP
 
+### Retry Escalation (3-Strike)
+
+A task's failure count is `max(attempts, ERROR lines for that task id in
+harness-progress.txt)`. The declared `attempts` field is written by whoever ran the
+task; the log is what happened. Taking the larger of the two means a session that
+forgets to bump `attempts` cannot earn unlimited retries.
+
+At **2 failures**, the Stop hook stops emitting the generic continue message and
+emits `ESCALATION REQUIRED` instead. A third attempt at the same approach is the
+same failure again, so before retrying, change one of these and say which:
+
+1. **The vendor** — route the task to a different *model* than the last attempt
+   used. A different backend running the same model family is the same prior, not a
+   second opinion. This is `omo` delegation ground 1.
+2. **The approach** — state the new hypothesis and how it differs from the two that
+   failed.
+
+The retry prompt carries both prior attempts and what was observed, not just the
+symptom. If neither can change, mark the task blocked with the evidence.
+
 ### Task Execution Cycle
 
 For each task, execute this exact sequence:

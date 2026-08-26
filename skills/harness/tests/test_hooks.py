@@ -234,6 +234,75 @@ class TestStopHookTaskLogic(unittest.TestCase):
         self.assertEqual(data["decision"], "block")
         self.assertIn("Retry me", data["reason"])
 
+    def test_second_failure_demands_escalation(self):
+        """attempts >= 2 turns the generic continue message into an escalation order."""
+        write_tasks(self.root, [
+            {"id": "t1", "status": "failed", "attempts": 2, "max_attempts": 4,
+             "priority": "P0", "depends_on": [], "title": "Flaky fix"},
+        ])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        data = json.loads(stdout)
+        self.assertEqual(data["decision"], "block")
+        self.assertIn("ESCALATION REQUIRED", data["reason"])
+        self.assertIn("attempts=2/4", data["reason"])
+
+    def test_first_failure_does_not_escalate(self):
+        """One failure is a retry, not an escalation."""
+        write_tasks(self.root, [
+            {"id": "t1", "status": "failed", "attempts": 1, "max_attempts": 4,
+             "priority": "P0", "depends_on": [], "title": "First try"},
+        ])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        data = json.loads(stdout)
+        self.assertEqual(data["decision"], "block")
+        self.assertNotIn("ESCALATION REQUIRED", data["reason"])
+
+    def test_logged_errors_escalate_when_attempts_unbumped(self):
+        """The progress log is the fact; an unbumped attempts field cannot dodge it."""
+        (self.root / "harness-progress.txt").write_text(
+            "[2026-08-26T10:00:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] first\n"
+            "[2026-08-26T10:05:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] second\n"
+        )
+        write_tasks(self.root, [
+            {"id": "t1", "status": "failed", "attempts": 0, "max_attempts": 4,
+             "priority": "P0", "depends_on": [], "title": "Unbumped"},
+        ])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        data = json.loads(stdout)
+        self.assertEqual(data["decision"], "block")
+        self.assertIn("ESCALATION REQUIRED", data["reason"])
+        self.assertIn("failed 2 times", data["reason"])
+
+    def test_logged_errors_exhaust_retries(self):
+        """Retries run out on logged failures too, not just declared ones."""
+        (self.root / "harness-progress.txt").write_text(
+            "[2026-08-26T10:00:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] one\n"
+            "[2026-08-26T10:05:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] two\n"
+            "[2026-08-26T10:10:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] three\n"
+        )
+        write_tasks(self.root, [
+            {"id": "t1", "status": "failed", "attempts": 0, "max_attempts": 3, "depends_on": []},
+        ])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+
+    def test_other_task_errors_do_not_count(self):
+        """Failures are counted per task id, not per log."""
+        (self.root / "harness-progress.txt").write_text(
+            "[2026-08-26T10:00:00Z] [SESSION-1] ERROR [t2] [TASK_EXEC] not mine\n"
+            "[2026-08-26T10:05:00Z] [SESSION-1] ERROR [t2] [TASK_EXEC] also not mine\n"
+        )
+        write_tasks(self.root, [
+            {"id": "t1", "status": "failed", "attempts": 0, "max_attempts": 3,
+             "priority": "P0", "depends_on": [], "title": "Clean"},
+            {"id": "t2", "status": "completed"},
+        ])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        data = json.loads(stdout)
+        self.assertEqual(data["decision"], "block")
+        self.assertNotIn("ESCALATION REQUIRED", data["reason"])
+
     def test_exhausted_retries_allows_stop(self):
         """Failed task with attempts >= max_attempts allows stop."""
         write_tasks(self.root, [

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 MAX_CONSECUTIVE_BLOCKS = 8  # safety valve
+ESCALATE_AFTER_ATTEMPTS = 2  # omo delegation ground 1: two failures, then a different prior
 
 
 def _read_hook_payload() -> dict[str, Any]:
@@ -97,6 +98,29 @@ def _attempts(t: dict[str, Any]) -> int:
         return 0
 
 
+def _logged_failures(progress_tail: str) -> dict[str, int]:
+    """Count ERROR lines per task id in harness-progress.txt.
+
+    `attempts` is written by whoever executed the task, so a session that forgets
+    to bump it silently earns unlimited retries and never trips the escalation
+    below. The progress log is the file's own record of what happened; taking the
+    larger of the two makes the failure count a fact rather than a self-report.
+    """
+    counts: dict[str, int] = {}
+    for line in progress_tail.splitlines():
+        if " ERROR [" not in line:
+            continue
+        head, _, rest = line.partition(" ERROR [")
+        tid, sep, _ = rest.partition("]")
+        if sep and tid:
+            counts[tid.strip()] = counts.get(tid.strip(), 0) + 1
+    return counts
+
+
+def _effective_attempts(t: dict[str, Any], logged: dict[str, int]) -> int:
+    return max(_attempts(t), logged.get(str(t.get("id") or ""), 0))
+
+
 def _max_attempts(t: dict[str, Any]) -> int:
     try:
         v = t.get("max_attempts")
@@ -147,6 +171,27 @@ def _reset_block_counter(root: Path) -> None:
         p.unlink(missing_ok=True)
     except Exception:
         pass
+
+
+def _escalation_notice(task_id: str, tried: int) -> str:
+    """The 3-strike rule, stated as a requirement rather than left to judgment.
+
+    Both myclaude and cco leave "two failures, then escalate" as advice the model
+    may or may not act on. Emitting it from the hook, keyed off a count the hook
+    derived itself, is what turns it into a rule.
+    """
+    return (
+        f"\n\nESCALATION REQUIRED — {task_id} has failed {tried} times.\n"
+        "A third attempt at the same approach is not a retry, it is the same failure again.\n"
+        "Before running it, change one of these and say which:\n"
+        "  1. The vendor. Route this task to a different MODEL than the last attempt used "
+        "(different backend running the same model family does not count). "
+        "This is omo delegation ground 1.\n"
+        "  2. The approach. State the new hypothesis and how it differs from the two that failed.\n"
+        "The retry prompt MUST carry both prior attempts and what you observed, not just the "
+        "symptom. A retry without that context repeats the work that produced the failures.\n"
+        "If neither can change, mark the task blocked with the evidence and move on."
+    )
 
 
 def _is_harness_active(root: Path) -> bool:
@@ -238,6 +283,11 @@ def main() -> int:
         s = str(t.get("status") or "pending")
         counts[s] = counts.get(s, 0) + 1
 
+    try:
+        logged_failures = _logged_failures(_tail_text(progress_path)) if progress_path.is_file() else {}
+    except Exception:
+        logged_failures = {}
+
     completed_ids = {str(t.get("id", "")) for t in tasks if str(t.get("status", "")) == "completed"}
     completed_count = len(completed_ids)
 
@@ -245,7 +295,7 @@ def main() -> int:
     retryable = [
         t for t in tasks
         if str(t.get("status", "")) == "failed"
-        and _attempts(t) < _max_attempts(t)
+        and _effective_attempts(t, logged_failures) < _max_attempts(t)
         and _deps_completed(t, completed_ids)
     ]
     in_progress_any = [t for t in tasks if str(t.get("status", "")) == "in_progress"]
@@ -291,10 +341,16 @@ def main() -> int:
     # Block the stop — tasks remain
     next_task = _pick_next(pending_eligible, retryable)
     next_hint = ""
+    escalation = ""
     if next_task is not None:
         tid = str(next_task.get("id") or "")
         title = str(next_task.get("title") or "").strip()
+        tried = _effective_attempts(next_task, logged_failures)
         next_hint = f"next={tid}{(': ' + title) if title else ''}"
+        if tried:
+            next_hint += f" attempts={tried}/{_max_attempts(next_task)}"
+        if tried >= ESCALATE_AFTER_ATTEMPTS:
+            escalation = _escalation_notice(tid, tried)
 
     summary = (
         "HARNESS: 未满足停止条件，继续执行。\n"
@@ -309,6 +365,7 @@ def main() -> int:
         + "\n"
         + "请按 SKILL.md 的 Task Selection Algorithm 选择下一个 eligible 任务，并完整执行 Task Execution Cycle："
         "Claim → Checkpoint → Validate → Record outcome → STATS（如需）→ Continue。"
+        + escalation
     )
 
     print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
