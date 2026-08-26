@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover
 
 DEFAULT_INSTALL_DIR = "~/.claude"
 SETTINGS_FILE = "settings.json"
-WRAPPER_REQUIRED_MODULES = {"do", "omo"}
+WRAPPER_REQUIRED_MODULES = {"omo"}
 
 
 def _ensure_list(ctx: Dict[str, Any], key: str) -> List[Any]:

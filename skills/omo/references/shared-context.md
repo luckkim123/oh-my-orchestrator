@@ -6,14 +6,16 @@ The one axis where `gaebalai/claude-code-orchestrator` (MIT) beats upstream
 ## The problem it solves
 
 `myclaude` has no shared state that outlives a task. The `omo` Context Pack is an
-inline heredoc, so it lives for exactly one call. The `do` module's
-`.claude/do-tasks/<task>/*.jsonl` lives for exactly one task. When the task ends,
+inline heredoc, so it lives for exactly one call. Upstream's `do` module (not
+carried into this fork) kept `.claude/do-tasks/<task>/*.jsonl`, which lived for
+exactly one task. When the task ends,
 nothing remains. A vendor you consulted twice about the same subsystem learns it
 twice.
 
 Worse, a per-call payload is **truncatable**. Prompt injection through argv or stdin
 competes with the task text for the same budget, and the rules lose. Measured on
-claude 2.1.245, injected context above roughly 10,000 characters is dropped.
+claude 2.1.239, injected context above 10,000 characters is truncated: 9,800 arrives
+whole, 10,400 does not.
 
 ## Four pieces, and why one alone does nothing
 
