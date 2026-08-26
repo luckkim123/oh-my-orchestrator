@@ -195,6 +195,34 @@ def _integrity_failures(tasks: list[dict[str, Any]]) -> list[str]:
     return failures
 
 
+def _cost_unrecorded(state: dict[str, Any]) -> str:
+    """A campaign about to close with its actual cost never recorded.
+
+    The Stop payload cannot supply the number. Measured 2026-08-26 on claude
+    2.1.239, its keys are background_tasks, cwd, effort, hook_event_name,
+    last_assistant_message, permission_mode, prompt_id, session_crons, session_id,
+    stop_hook_active, transcript_path -- no cost, no token counts. So the hook can
+    only carry the demand; the figure has to come from the session and land in
+    board.json.
+
+    The campaign protocol requires actual against estimated. An estimate never
+    checked against the bill is how the next estimate stays wrong.
+    """
+    cost = state.get("cost")
+    if not isinstance(cost, dict):
+        return ""
+    if cost.get("actual_tokens") is not None:
+        return ""
+    est = cost.get("estimated_tokens")
+    return (
+        "HARNESS: the campaign is finishing with cost.actual_tokens still null"
+        + (f" (estimated {est})." if est else ".")
+        + "\nRecord what it actually cost in board.json before stopping, next to the "
+        "estimate it is meant to check. An estimate never compared against the bill "
+        "is how the next estimate stays wrong."
+    )
+
+
 def _escalation_notice(task_id: str, tried: int) -> str:
     """The 3-strike rule, stated as a requirement rather than left to judgment.
 
@@ -354,6 +382,13 @@ def main() -> int:
 
     # If nothing left to do, allow stop
     if not pending_eligible and not retryable and not in_progress_blocking:
+        # Last gate before the campaign closes. Guarded on stop_hook_active so it
+        # asks exactly once -- a cost the session refuses to record must not become
+        # a session that cannot end.
+        cost_gap = _cost_unrecorded(state) if on_board else ""
+        if cost_gap and not stop_hook_active:
+            print(json.dumps({"decision": "block", "reason": cost_gap}, ensure_ascii=False))
+            return 0
         _reset_block_counter(root)
         # Signal self-reflect hook BEFORE removing active marker
         try:

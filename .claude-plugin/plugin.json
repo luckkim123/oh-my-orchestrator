@@ -87,6 +87,17 @@
           }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/harness/hooks/harness-precompact.py\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

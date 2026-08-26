@@ -20,6 +20,7 @@ SESSION_HOOK = HOOKS_DIR / "harness-sessionstart.py"
 IDLE_HOOK = HOOKS_DIR / "harness-teammateidle.py"
 SUBAGENT_HOOK = HOOKS_DIR / "harness-subagentstop.py"
 SUBAGENT_START_HOOK = HOOKS_DIR / "harness-subagentstart.py"
+PRECOMPACT_HOOK = HOOKS_DIR / "harness-precompact.py"
 
 
 def build_hook_env(env_extra: dict | None = None) -> dict[str, str]:
@@ -1147,6 +1148,114 @@ class TestBoardGate(unittest.TestCase):
         code, stdout, _ = run_hook(STOP_HOOK, self._payload())
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "", "a broken board must not leave hooks firing")
+
+
+# ---------------------------------------------------------------------------
+# Cost Gate (Stop) -- measured 2026-08-26: the Stop payload carries no token
+# counts, so the figure has to come from the board and the hook only asks.
+# ---------------------------------------------------------------------------
+class TestCostGate(unittest.TestCase):
+    """A campaign must not close with cost.actual_tokens still null."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.root = Path(self.tmpdir)
+        activate(self.root)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _done_board(self, cost):
+        write_board(self.root, [
+            {"id": "t1", "title": "done", "status": "completed",
+             "validation": {"command": "true"}},
+        ], cost=cost)
+
+    def _payload(self, **extra):
+        return {"cwd": self.tmpdir, **extra}
+
+    def test_blocks_when_actual_null(self):
+        self._done_board({"estimated_tokens": 50000, "actual_tokens": None})
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        data = json.loads(stdout)
+        self.assertEqual(data["decision"], "block")
+        self.assertIn("actual_tokens", data["reason"])
+        self.assertIn("50000", data["reason"], "the estimate it checks is named")
+
+    def test_allows_when_actual_recorded(self):
+        self._done_board({"estimated_tokens": 50000, "actual_tokens": 61234})
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "", "cost recorded -> nothing left to hold")
+
+    def test_asks_once_only(self):
+        """stop_hook_active is the loop guard: a refused cost must not trap the session."""
+        self._done_board({"estimated_tokens": 50000, "actual_tokens": None})
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload(stop_hook_active=True))
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+
+    def test_legacy_root_exempt(self):
+        """harness-tasks.json predates the cost block; it must not fire there."""
+        write_tasks(self.root, [{"id": "t1", "title": "done", "status": "completed"}])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(stdout, "", "no board -> no campaign contract")
+
+
+# ---------------------------------------------------------------------------
+# PreCompact drift warning -- measured 2026-08-26: this event CAN block via
+# exit 2, but carries no stop_hook_active, so this hook only warns.
+# ---------------------------------------------------------------------------
+class TestPreCompactDrift(unittest.TestCase):
+    """HUB.md trailing board.json is reported, never enforced."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.root = Path(self.tmpdir)
+        write_board(self.root, [{"id": "t1", "title": "x", "status": "pending"}])
+        self.hub = self.root / ".orchestration" / "HUB.md"
+        self.hub.write_text("# campaign\n", encoding="utf-8")
+        self.board = self.root / ".orchestration" / "board.json"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _age_hub(self, seconds):
+        st = self.board.stat()
+        os.utime(self.hub, (st.st_atime - seconds, st.st_mtime - seconds))
+
+    def _payload(self, **extra):
+        return {"cwd": self.tmpdir, "hook_event_name": "PreCompact",
+                "trigger": "manual", **extra}
+
+    def test_warns_on_drift(self):
+        self._age_hub(3600)
+        code, stdout, stderr = run_hook(PRECOMPACT_HOOK, self._payload())
+        self.assertEqual(code, 0, "warning only -- exit 2 would refuse the compaction")
+        data = json.loads(stdout)
+        self.assertTrue(data["continue"], "compaction must proceed")
+        self.assertIn("HUB.md", data["systemMessage"])
+        self.assertEqual(stderr, "", "stderr on this event is a user-visible refusal")
+
+    def test_silent_within_tolerance(self):
+        self._age_hub(60)
+        code, stdout, _ = run_hook(PRECOMPACT_HOOK, self._payload())
+        self.assertEqual(stdout, "", "HUB written seconds after the board is normal")
+
+    def test_silent_when_campaign_closed(self):
+        write_board(self.root, [{"id": "t1", "title": "x", "status": "pending"}],
+                    status="closed")
+        self._age_hub(3600)
+        code, stdout, _ = run_hook(PRECOMPACT_HOOK, self._payload())
+        self.assertEqual(stdout, "", "a closed campaign keeps its board; it is not active")
+
+    def test_silent_without_hub(self):
+        self.hub.unlink()
+        code, stdout, _ = run_hook(PRECOMPACT_HOOK, self._payload())
+        self.assertEqual(stdout, "", "no prose half -> nothing to drift from")
 
 
 if __name__ == "__main__":

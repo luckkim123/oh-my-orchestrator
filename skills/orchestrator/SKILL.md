@@ -57,9 +57,10 @@ The board earns its cost when workers have to see each other's conclusions.
 5. **Run.** Workers claim tasks, report, and stop. The Stop and SubagentStop hooks
    hold anyone who tries to finish quietly.
 6. **Close.** Set `status: "closed"`, record `cost.actual_tokens`, promote posts to
-   their owning stores, sweep `agents/`. **Leave the board on disk** — the posts are
-   the record, which is exactly why the activation gate is a status bit rather than
-   the file's existence.
+   their owning stores, sweep `agents/`. The Stop hook holds the close once if that
+   figure is still null — an estimate never checked against the bill is how the next
+   estimate stays wrong. **Leave the board on disk** — the posts are the record, which
+   is exactly why the activation gate is a status bit rather than the file's existence.
 
 ## What this layer will not do for you
 

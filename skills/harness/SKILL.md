@@ -84,12 +84,12 @@ work — do not revive it.
 |---|---|---|
 | `SubagentStart` | **Inject only.** Its output schema carries one field, `additionalContext`, and the call site does not cancel a spawn on the hook's result. Both `exit 2` and a JSON `blockingError` were tried; the subagent ran either way. Its stderr never reaches the user. | 0-A, 0-B |
 | `SubagentStart` | **Observe only.** Board mismatches go to `.orchestration/observations.jsonl` *and* into the injected context, because the subagent is the only path a notice has to a human. | 0-A |
-| `SubagentStop` | **Enforce.** `exit 2` + stderr holds the exit and forces the subagent to resume. This is the one surface where enforcement works. | 0-C |
+| `SubagentStop` | **Enforce.** `exit 2` + stderr holds the exit and forces the subagent to resume. A JSON `{"decision": "block"}` gates it too; the code uses `exit 2`. | 0-C, 0-I |
 | `TeammateIdle` | **Never fires** for Agent-tool subagents. The Agent tool makes a `local_agent`; `TeammateIdle` is `in_process_teammate` only. The hook is kept wired for the day that changes, but nothing routes through it. | 0-C |
-| `Stop` → block on `cost.actual_tokens == null` | **Unmeasured.** Do not wire it until it is. | — |
-| `PreCompact` → board/decision-table drift check | **Unmeasured.** Same. | — |
+| `Stop` | **Enforce.** Both conventions gate it. Holds the campaign's close until `board.json` records `cost.actual_tokens` — once, guarded on `stop_hook_active`. The payload carries no token counts, so the figure comes from the board and the hook only asks. | 0-F, 0-H |
+| `PreCompact` | **Warn only** — by choice, not by limit. It *can* block, and the refusal reaches the user verbatim. It must not: this event has no `stop_hook_active`, so a blocking hook has no loop guard and a wrong one makes compaction impossible at the context ceiling. It warns when `board.json` runs more than 15 minutes ahead of `HUB.md`. | 0-G |
 
-Two consequences worth stating plainly:
+Three consequences worth stating plainly:
 
 **A launch gate is a nudge, not a gate.** Nothing stops a spawn. What replaces it is
 three weaker things stacked: the skill prose, the board check at spawn time, and the
@@ -98,6 +98,13 @@ post-hoc rejection at `SubagentStop`. Design as if the spawn always succeeds.
 **The loop guard is ours.** `stop_hook_active` arrives `true` on the turn a rejection
 caused. Claude Code provides no cutoff of its own — handing us that flag *is* the
 contract that we cut the loop. Every blocking hook returns 0 when it is set.
+
+**The blocking convention is per-event. Never generalize one event's result to
+another.** `SubagentStart` refuses both conventions; `Stop` and `SubagentStop` accept
+both; `PreCompact` accepts `exit 2`. Every row above was measured on its own event,
+and the one row that was inferred rather than measured turned out wrong. If you add a
+hook on an event not in this table, measure it before you rely on it — the rig is in
+the vault under `measurements/probes/`.
 
 ### Injection cap
 
