@@ -480,7 +480,7 @@ At session end, update `harness-tasks.json`: set `last_session` to current times
 2. Create the empty working directories: `posts/`, `sessions/`, `agents/`
 3. Create `harness-progress.txt` with an initialization entry
 4. Install the vendor loaders for whichever CLIs this project uses, from
-   `templates/vendor/` — see `omo`'s `references/shared-context.md`
+   `templates/vendor/` — see `skills/omo/references/shared-context.md`
 5. Optionally create `harness-init.sh` template (chmod +x)
 6. Ask the user: add `.orchestration/board.json` and `harness-progress.txt` to
    `.gitignore`? The posts and `HUB.md` are usually worth committing — they are the
