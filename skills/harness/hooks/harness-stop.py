@@ -196,30 +196,36 @@ def _integrity_failures(tasks: list[dict[str, Any]]) -> list[str]:
 
 
 def _cost_unrecorded(state: dict[str, Any]) -> str:
-    """A campaign about to close with its actual cost never recorded.
+    """A campaign about to close without having said what it cost.
 
     The Stop payload cannot supply the number. Measured 2026-08-26 on claude
     2.1.239, its keys are background_tasks, cwd, effort, hook_event_name,
     last_assistant_message, permission_mode, prompt_id, session_crons, session_id,
-    stop_hook_active, transcript_path -- no cost, no token counts. So the hook can
-    only carry the demand; the figure has to come from the session and land in
-    board.json.
+    stop_hook_active, transcript_path -- no cost, no token counts.
 
-    The campaign protocol requires actual against estimated. An estimate never
-    checked against the bill is how the next estimate stays wrong.
+    So a session inside this hook often has no way to measure its own spend, and
+    the first version of this gate demanded a number anyway. A live test on
+    2026-08-26 showed exactly what that produces: the session wrote 21000, a
+    figure it had invented, because inventing was the only way past the gate.
+    A check that can only be satisfied by fabrication is worse than no check --
+    it manufactures the false data the harness exists to prevent.
+
+    So the gate asks for a statement, not a figure. "unmeasured" discharges it.
     """
     cost = state.get("cost")
     if not isinstance(cost, dict):
         return ""
-    if cost.get("actual_tokens") is not None:
+    actual = cost.get("actual_tokens")
+    if actual is not None:
         return ""
     est = cost.get("estimated_tokens")
     return (
-        "HARNESS: the campaign is finishing with cost.actual_tokens still null"
+        "HARNESS: the campaign is closing and cost.actual_tokens is still null"
         + (f" (estimated {est})." if est else ".")
-        + "\nRecord what it actually cost in board.json before stopping, next to the "
-        "estimate it is meant to check. An estimate never compared against the bill "
-        "is how the next estimate stays wrong."
+        + "\nIf you know what it cost, write the number. **If you cannot measure it "
+        "from here, write the string \"unmeasured\" -- do not invent a figure.** A "
+        "fabricated cost is worse than a missing one: the next estimate gets scored "
+        "against it and comes out confidently wrong.\nEither value closes this gate."
     )
 
 

@@ -203,6 +203,13 @@ fallibility rule applies to managers too.
 number. A campaign that never records the actual number cannot correct the next
 estimate, and every estimate after it is the same guess repeated.
 
+The Stop hook holds the close once while `actual_tokens` is `null`. **If you cannot
+measure the spend from where you are, write the string `"unmeasured"`.** That closes
+the gate as legitimately as a number does. Do not put a figure there that you did not
+read off something -- a live test of an earlier version of this gate, which demanded a
+number, got 21000 invented on the spot. The next campaign's estimate is scored against
+whatever sits in this field, so a fabricated one is worse than an absent one.
+
 ## Termination and scale
 
 - Worker count comes from the axis count, never from "more is better". 13-vs-3 has

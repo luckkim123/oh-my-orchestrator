@@ -1197,6 +1197,20 @@ class TestCostGate(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
 
+    def test_unmeasured_closes_the_gate(self):
+        """A gate satisfiable only by a number is satisfiable only by inventing one."""
+        self._done_board({"estimated_tokens": 50000, "actual_tokens": "unmeasured"})
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "", "an honest 'cannot measure' must close it")
+
+    def test_block_message_offers_the_honest_exit(self):
+        self._done_board({"estimated_tokens": 50000, "actual_tokens": None})
+        _, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        reason = json.loads(stdout)["reason"]
+        self.assertIn("unmeasured", reason)
+        self.assertIn("do not invent", reason.lower())
+
     def test_legacy_root_exempt(self):
         """harness-tasks.json predates the cost block; it must not fire there."""
         write_tasks(self.root, [{"id": "t1", "title": "done", "status": "completed"}])
