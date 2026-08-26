@@ -69,14 +69,21 @@ A vendor that can rewrite the rules it was given is not constrained by them.
 
 | Vendor | Files | Source |
 |:---|:---|:---|
-| codex | `.codex/config.toml` with `[[skills.config]] path = ".codex/skills/context-loader"`, plus that skill directory | `templates/vendor/codex/` |
-| gemini | `.gemini/settings.json` with `experimental.skills = true`, plus `.gemini/skills/context-loader/` | `templates/vendor/gemini/` |
-| antigravity | `.agents/skills/context-loader/`, and `~/.gemini/antigravity-cli/skills/` for the user-scope copy | `templates/vendor/antigravity/` |
+| codex | `.codex/config.toml` with a `[[skills.config]]` block per skill, plus `.codex/skills/{context-loader,decision-record}/` | `templates/vendor/codex/` |
+| gemini | `.gemini/settings.json` with `experimental.skills = true`, plus `.gemini/skills/{context-loader,decision-record}/` | `templates/vendor/gemini/` |
+| antigravity | `.agents/skills/`, and `~/.gemini/antigravity-cli/skills/` for the user-scope copy | `templates/vendor/antigravity/` |
 | claude | Nothing to install -- a claude-backend worker reads `.orchestration/` directly | -- |
 
 **The antigravity paths are unverified.** The CLI was not installed on the machine
 where this was written, and `agy plugin import claude` was never run. Treat that row
 as a plan, not a measurement, until someone confirms it.
+
+## Two skills go to the vendor side
+
+`context-loader` reads the store on every task. `decision-record` writes back to it:
+a vendor that can read the decisions but never add one makes the store
+one-directional, and whatever it concluded dies with the call. Protocol and row
+format: `decision-record.md`.
 
 ## Pruning the payload per project
 

@@ -206,6 +206,21 @@ def main() -> int:
         "\n\n如果一切已完成，简要总结成果即可结束。如果发现问题，继续修复。"
     )
 
+    parts.append(
+        "\n6. Knowledge mining (only if the run produced something reusable):"
+        "\n   A candidate qualifies only with BOTH of these, and you state both:"
+        "\n   - Evidence: the file, command, or log line that demonstrates it. Not a"
+        " recollection of the session."
+        "\n   - Confidence >= 0.6 that it holds beyond this one task. Below that it is"
+        " an anecdote, and an anecdote promoted to a rule costs more than the gap it filled."
+        "\n   Where it lands: verified library behavior ->"
+        " .orchestration/knowledge/libraries/<name>.md (fixed section order);"
+        " a settled design question -> the .orchestration/HUB.md decision table;"
+        " research someone would otherwise redo -> .orchestration/knowledge/research/."
+        "\n   Nothing qualifying? Say so. An empty mining pass is a normal outcome and"
+        " a fabricated one poisons the store."
+    )
+
     reason = "\n".join(parts)
 
     print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))

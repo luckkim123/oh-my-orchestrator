@@ -84,6 +84,10 @@ under this project's rules, and you weigh its answer accordingly.
 
 Setup, layout, write permissions, and per-project pruning: `references/shared-context.md`.
 
+When a design question gets settled -- by you or by a vendor -- record it without
+being asked: `references/decision-record.md`. A decision written nowhere gets
+re-argued and eventually answered differently.
+
 ## Vendor Invocation Format
 
 ```bash
