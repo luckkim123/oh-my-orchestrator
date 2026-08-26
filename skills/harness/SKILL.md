@@ -65,6 +65,51 @@ only seam to Orca and it is one-directional. Do not mirror Orca state into the b
 the harness has to run without Orca, and a hook that needs a live Orca runtime to
 evaluate the gate hard-fails on any machine that does not have one.
 
+## Enforcement Surface
+
+Measured on claude 2.1.239. The design that assumed spawn-time blocking does not
+work — do not revive it.
+
+| Hook | What it can do | Evidence |
+|---|---|---|
+| `SubagentStart` | **Inject only.** Its output schema carries one field, `additionalContext`, and the call site does not cancel a spawn on the hook's result. Both `exit 2` and a JSON `blockingError` were tried; the subagent ran either way. Its stderr never reaches the user. | 0-A, 0-B |
+| `SubagentStart` | **Observe only.** Board mismatches go to `.orchestration/observations.jsonl` *and* into the injected context, because the subagent is the only path a notice has to a human. | 0-A |
+| `SubagentStop` | **Enforce.** `exit 2` + stderr holds the exit and forces the subagent to resume. This is the one surface where enforcement works. | 0-C |
+| `TeammateIdle` | **Never fires** for Agent-tool subagents. The Agent tool makes a `local_agent`; `TeammateIdle` is `in_process_teammate` only. The hook is kept wired for the day that changes, but nothing routes through it. | 0-C |
+| `Stop` → block on `cost.actual_tokens == null` | **Unmeasured.** Do not wire it until it is. | — |
+| `PreCompact` → board/decision-table drift check | **Unmeasured.** Same. | — |
+
+Two consequences worth stating plainly:
+
+**A launch gate is a nudge, not a gate.** Nothing stops a spawn. What replaces it is
+three weaker things stacked: the skill prose, the board check at spawn time, and the
+post-hoc rejection at `SubagentStop`. Design as if the spawn always succeeds.
+
+**The loop guard is ours.** `stop_hook_active` arrives `true` on the turn a rejection
+caused. Claude Code provides no cutoff of its own — handing us that flag *is* the
+contract that we cut the loop. Every blocking hook returns 0 when it is set.
+
+### Injection cap
+
+`hookSpecificOutput.additionalContext` is honored only in the nested form carrying
+`hookEventName`; a top-level `additionalContext` is ignored. 9,800 characters arrive
+intact; 10,400 are truncated to a 2KB preview and spilled to a file the subagent then
+has to go read. The hook caps at 10,000 and drops role memory before it drops a
+mismatch notice.
+
+### What a worker owes before it stops
+
+Enforced only against a **declared roster**. An empty `workers[]` means the campaign
+cannot judge membership, and rejecting every ad-hoc subagent is the false positive
+that gets a hook switched off.
+
+1. Be on the board. An unregistered role is either a missing row or a spawn that does
+   not belong to this campaign.
+2. Have written `.orchestration/agents/<role>.md` — 40 lines maximum, semantic rather
+   than chronological, append-only.
+3. Have reported: a post under `.orchestration/posts/`, and `workers[].status` set to
+   `reported`. **Reporting is what ends the work, not finishing it quietly.**
+
 ## Progress Persistence (Dual-File System)
 
 Two files, side by side: `.orchestration/board.json` holds structured state, and

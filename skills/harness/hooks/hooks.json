@@ -1,5 +1,5 @@
 {
-  "description": "Harness hooks: prevent premature stop, self-reflection iteration, inject task context on session start, keep teammates working, block subagent stop when tasks remain",
+  "description": "Harness hooks: hold a premature stop, self-reflect on completion, inject task context on session start, inject the role card and observe board mismatches on subagent spawn, hold a subagent's exit until its campaign obligations are met",
   "hooks": {
     "Stop": [
       {
@@ -40,6 +40,17 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/harness-teammateidle.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/harness-subagentstart.py\"",
             "timeout": 10
           }
         ]

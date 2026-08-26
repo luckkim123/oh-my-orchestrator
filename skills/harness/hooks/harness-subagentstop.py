@@ -61,6 +61,58 @@ def _is_harness_active(root: Path) -> bool:
     return hc.is_harness_active(root)
 
 
+def _reject(message: str) -> int:
+    """Hold the subagent's exit.
+
+    exit 2 with stderr is the measured blocking protocol for SubagentStop: the
+    subagent is forced to resume and the stderr reaches it. A JSON
+    `decision: "block"` was never verified to gate this event, and an unverified
+    blocking path is how a hook ends up dead without anyone noticing.
+
+    The caller must have checked `stop_hook_active` first -- Claude Code sets it
+    on the resumed turn and provides no cutoff of its own, so the loop guard is
+    ours to hold.
+    """
+    sys.stderr.write("HARNESS: " + message + "\n")
+    return 2
+
+
+def _campaign_failures(root: Path, state: dict[str, Any], role: str) -> list[str]:
+    """What this worker owes the campaign before it may stop."""
+    if hc is None or not role:
+        return []
+    workers = hc.board_workers(state)
+    if not workers:
+        return []
+
+    w = hc.find_worker(state, role)
+    if w is None:
+        return [
+            f"role '{role}' is not registered in board.json workers[]. Either add "
+            "the row, or spawn it outside an active campaign."
+        ]
+
+    failures: list[str] = []
+
+    memory = root / ".orchestration" / "agents" / f"{role}.md"
+    if not memory.is_file():
+        failures.append(
+            f".orchestration/agents/{role}.md does not exist. Write what this role "
+            "learned -- 40 lines maximum, semantic rather than chronological, "
+            "append-only -- so the next spawn of this role does not start blind."
+        )
+
+    status = str(w.get("status") or "").strip()
+    if status not in ("reported", "closed"):
+        failures.append(
+            f"board status for '{role}' is '{status or 'unset'}'. A worker reports "
+            "before it stops: land the post under .orchestration/posts/ and set "
+            "workers[].status to 'reported'. Reporting is what ends the work, not "
+            "finishing it quietly."
+        )
+    return failures
+
+
 def main() -> int:
     payload = _read_hook_payload()
 
@@ -97,12 +149,11 @@ def main() -> int:
     identities = {x for x in (worker_id, agent_id, teammate_name) if x}
 
     if is_concurrent and in_progress and not identities:
-        reason = (
-            "HARNESS: concurrent 模式缺少 worker identity（HARNESS_WORKER_ID/agent_id）。"
-            "为避免误停导致任务悬空，本次阻止停止。"
+        return _reject(
+            "concurrent mode, but this subagent has no worker identity "
+            "(HARNESS_WORKER_ID / agent_id / teammate_name are all empty). "
+            "Stopping now would leave the in-progress task dangling with no owner."
         )
-        print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
-        return 0
 
     if is_concurrent:
         owned = [
@@ -112,16 +163,25 @@ def main() -> int:
     else:
         owned = in_progress
 
-    # Only block when this subagent still owns in-progress work.
+    # Only hold the exit when this subagent still owns in-progress work.
     if owned:
         tid = str(owned[0].get("id") or "")
         title = str(owned[0].get("title") or "")
-        reason = (
-            f"HARNESS: 子代理仍有进行中的任务 [{tid}] {title}。"
-            "请完成当前任务的验证和记录后再停止。"
+        return _reject(
+            f"task [{tid}] {title} is still in_progress and owned by you. "
+            "Run its validation command, record the outcome, and then stop."
         )
-        print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
-        return 0
+
+    # Campaign obligations. Only enforced against a declared roster: an empty
+    # workers[] means the campaign cannot judge membership, and rejecting every
+    # ad-hoc subagent is the false positive that gets a hook switched off.
+    role = str(payload.get("agent_type") or "").strip()
+    failures = _campaign_failures(root, state, role)
+    if failures:
+        return _reject(
+            "this subagent has not met its campaign obligations:\n"
+            + "\n".join(f"  - {f}" for f in failures)
+        )
 
     return 0  # all done, allow stop
 

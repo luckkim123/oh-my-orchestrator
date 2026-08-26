@@ -19,6 +19,7 @@ STOP_HOOK = HOOKS_DIR / "harness-stop.py"
 SESSION_HOOK = HOOKS_DIR / "harness-sessionstart.py"
 IDLE_HOOK = HOOKS_DIR / "harness-teammateidle.py"
 SUBAGENT_HOOK = HOOKS_DIR / "harness-subagentstop.py"
+SUBAGENT_START_HOOK = HOOKS_DIR / "harness-subagentstart.py"
 
 
 def build_hook_env(env_extra: dict | None = None) -> dict[str, str]:
@@ -149,9 +150,8 @@ class TestActivationGuard(unittest.TestCase):
         ])
         activate(self.root)
         code, stdout, stderr = run_hook(SUBAGENT_HOOK, self._payload())
-        self.assertEqual(code, 0)
-        data = json.loads(stdout)
-        self.assertEqual(data["decision"], "block")
+        self.assertEqual(code, 2, "exit 2 + stderr is the measured blocking protocol")
+        self.assertIn("Working task", stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -575,10 +575,9 @@ class TestSubagentStopHook(unittest.TestCase):
         write_tasks(self.root, [
             {"id": "t1", "status": "in_progress", "title": "Working"},
         ])
-        code, stdout, _ = run_hook(SUBAGENT_HOOK, {"cwd": self.tmpdir})
-        data = json.loads(stdout)
-        self.assertEqual(data["decision"], "block")
-        self.assertIn("Working", data["reason"])
+        code, stdout, stderr = run_hook(SUBAGENT_HOOK, {"cwd": self.tmpdir})
+        self.assertEqual(code, 2)
+        self.assertIn("Working", stderr)
 
     def test_pending_allows(self):
         write_tasks(self.root, [
@@ -621,13 +620,12 @@ class TestSubagentStopHook(unittest.TestCase):
         write_tasks(self.root, [
             {"id": "t1", "status": "in_progress", "claimed_by": "worker-a", "title": "Mine"},
         ], session_config={"concurrency_mode": "concurrent"})
-        code, stdout, _ = run_hook(
+        code, stdout, stderr = run_hook(
             SUBAGENT_HOOK, {"cwd": self.tmpdir},
             env_extra={"HARNESS_WORKER_ID": "worker-a"},
         )
-        data = json.loads(stdout)
-        self.assertEqual(data["decision"], "block")
-        self.assertIn("Mine", data["reason"])
+        self.assertEqual(code, 2)
+        self.assertIn("Mine", stderr)
 
     def test_concurrent_other_worker_in_progress_allows(self):
         write_tasks(self.root, [
@@ -644,10 +642,9 @@ class TestSubagentStopHook(unittest.TestCase):
         write_tasks(self.root, [
             {"id": "t1", "status": "in_progress", "claimed_by": "worker-a", "title": "Other"},
         ], session_config={"concurrency_mode": "concurrent"})
-        code, stdout, _ = run_hook(SUBAGENT_HOOK, {"cwd": self.tmpdir})
-        data = json.loads(stdout)
-        self.assertEqual(data["decision"], "block")
-        self.assertIn("worker identity", data["reason"])
+        code, stdout, stderr = run_hook(SUBAGENT_HOOK, {"cwd": self.tmpdir})
+        self.assertEqual(code, 2)
+        self.assertIn("worker identity", stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -874,6 +871,156 @@ class TestSelfReflectStopHook(unittest.TestCase):
         )
         data = json.loads(stdout)
         self.assertEqual(data["decision"], "block")
+
+
+class TestSubagentStartHook(unittest.TestCase):
+    """SubagentStart injects and observes. It cannot block -- measured, 2.1.239."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.root = Path(self.tmpdir)
+        (self.root / "harness-progress.txt").write_text("")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _payload(self, role="lit-critic", **extra):
+        return {"cwd": self.tmpdir, "agent_type": role,
+                "agent_id": "a1", "session_id": "s1", **extra}
+
+    def _worker(self, **over):
+        w = {"role": "lit-critic", "vendor": "codex", "model": "gpt-5.2",
+             "writes_repo": False, "worktree": None, "status": "planned",
+             "orca_dispatch_id": None}
+        w.update(over)
+        return w
+
+    def test_closed_board_injects_nothing(self):
+        write_board(self.root, [], status="closed", workers=[self._worker()])
+        code, stdout, _ = run_hook(SUBAGENT_START_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+
+    def test_registered_role_gets_its_board_row(self):
+        write_board(self.root, [], workers=[self._worker()])
+        code, stdout, _ = run_hook(SUBAGENT_START_HOOK, self._payload())
+        data = json.loads(stdout)
+        ctx = data["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(data["hookSpecificOutput"]["hookEventName"], "SubagentStart",
+                         "only the nested form carrying hookEventName is honored")
+        self.assertIn("codex", ctx)
+        self.assertIn("gpt-5.2", ctx)
+
+    def test_unregistered_role_is_observed(self):
+        write_board(self.root, [], workers=[self._worker()])
+        code, stdout, _ = run_hook(SUBAGENT_START_HOOK, self._payload(role="stranger"))
+        self.assertEqual(code, 0, "SubagentStart must never block a spawn")
+        ctx = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("not on the board", ctx)
+        obs = (self.root / ".orchestration" / "observations.jsonl").read_text()
+        self.assertIn("board_mismatch", obs)
+        self.assertIn("stranger", obs)
+
+    def test_empty_roster_is_not_a_mismatch(self):
+        """A campaign that declared no workers cannot judge membership."""
+        write_board(self.root, [], workers=[])
+        code, stdout, _ = run_hook(SUBAGENT_START_HOOK, self._payload(role="anyone"))
+        ctx = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertNotIn("not on the board", ctx)
+        self.assertFalse((self.root / ".orchestration" / "observations.jsonl").exists())
+
+    def test_null_model_is_observed(self):
+        write_board(self.root, [], workers=[self._worker(model=None)])
+        code, stdout, _ = run_hook(SUBAGENT_START_HOOK, self._payload())
+        ctx = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("no model on the board", ctx)
+
+    def test_duplicate_role_is_observed(self):
+        write_board(self.root, [], workers=[self._worker(), self._worker(vendor="gemini")])
+        code, stdout, _ = run_hook(SUBAGENT_START_HOOK, self._payload())
+        ctx = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("2 rows on the board", ctx)
+
+    def test_injection_respects_the_measured_cap(self):
+        """9800 chars arrive intact, 10400 are truncated to a preview -- stay under."""
+        write_board(self.root, [], workers=[self._worker()])
+        mem = self.root / ".orchestration" / "agents"
+        mem.mkdir(parents=True, exist_ok=True)
+        (mem / "lit-critic.md").write_text("x" * 50_000, encoding="utf-8")
+        code, stdout, _ = run_hook(SUBAGENT_START_HOOK, self._payload())
+        ctx = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertLessEqual(len(ctx), 10000)
+        self.assertIn("truncated", ctx)
+
+    def test_notice_survives_truncation(self):
+        """Role memory gives way first; the mismatch notice is the point of the call."""
+        write_board(self.root, [], workers=[self._worker()])
+        mem = self.root / ".orchestration" / "agents"
+        mem.mkdir(parents=True, exist_ok=True)
+        (mem / "stranger.md").write_text("y" * 50_000, encoding="utf-8")
+        code, stdout, _ = run_hook(SUBAGENT_START_HOOK, self._payload(role="stranger"))
+        ctx = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("not on the board", ctx)
+        self.assertLessEqual(len(ctx), 10000)
+
+
+class TestSubagentStopCampaign(unittest.TestCase):
+    """Campaign obligations are enforced where enforcement actually works."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.root = Path(self.tmpdir)
+        (self.root / "harness-progress.txt").write_text("")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _payload(self, role="lit-critic", **extra):
+        return {"cwd": self.tmpdir, "agent_type": role, **extra}
+
+    def _worker(self, **over):
+        w = {"role": "lit-critic", "vendor": "codex", "model": "gpt-5.2",
+             "status": "planned"}
+        w.update(over)
+        return w
+
+    def _memory(self, role="lit-critic"):
+        d = self.root / ".orchestration" / "agents"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{role}.md").write_text("learned things\n", encoding="utf-8")
+
+    def test_missing_memory_and_report_both_reported(self):
+        write_board(self.root, [], workers=[self._worker()])
+        code, stdout, stderr = run_hook(SUBAGENT_HOOK, self._payload())
+        self.assertEqual(code, 2)
+        self.assertIn("agents/lit-critic.md", stderr)
+        self.assertIn("'planned'", stderr)
+
+    def test_reported_with_memory_may_stop(self):
+        write_board(self.root, [], workers=[self._worker(status="reported")])
+        self._memory()
+        code, stdout, stderr = run_hook(SUBAGENT_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+
+    def test_unregistered_role_is_rejected(self):
+        write_board(self.root, [], workers=[self._worker()])
+        code, stdout, stderr = run_hook(SUBAGENT_HOOK, self._payload(role="stranger"))
+        self.assertEqual(code, 2)
+        self.assertIn("not registered", stderr)
+
+    def test_empty_roster_enforces_nothing(self):
+        write_board(self.root, [], workers=[])
+        code, stdout, stderr = run_hook(SUBAGENT_HOOK, self._payload(role="anyone"))
+        self.assertEqual(code, 0)
+
+    def test_stop_hook_active_bypasses_enforcement(self):
+        """The loop guard is ours to hold -- one rejection, then let it go."""
+        write_board(self.root, [], workers=[self._worker()])
+        code, stdout, stderr = run_hook(SUBAGENT_HOOK, self._payload(stop_hook_active=True))
+        self.assertEqual(code, 0)
 
 
 class TestBoardGate(unittest.TestCase):
