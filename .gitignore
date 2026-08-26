@@ -7,6 +7,9 @@
 __pycache__
 .coverage
 coverage.out
-references
+/references/
 output/
 .worktrees/
+.omc/
+.phase0-scratch/
+.phase0-findings.md

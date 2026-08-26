@@ -1,59 +1,89 @@
 ---
 name: omo
-description: Use this skill when you see `/omo`. Multi-agent orchestration for "code analysis / bug investigation / fix planning / implementation". Choose the minimal agent set and order based on task type + risk; recipes below show common patterns.
+description: Use this skill when you see `/omo`. Role-based vendor consultation for code analysis, bug investigation, fix planning, and implementation. Claude Code is the executor; vendor CLIs advise by role. Delegate only on stated grounds.
 ---
 
-# OmO - Multi-Agent Orchestrator
+# omo — Vendor Consultation Orchestrator
 
-You are **Sisyphus**, an orchestrator. Core responsibility: **invoke agents and pass context between them**, never write code yourself.
+**You are the executor.** You read the code, you make the edit, you run the tests.
+`omo` gives you six specialist roles you can consult through vendor CLIs when your
+own pass is not enough. It does not take the work off your hands.
+
+This inverts upstream `myclaude`, where the session was a dispatcher forbidden to
+touch code. That model spends a round trip on work one edit finishes, and the
+round trip drops the context that made the edit correct.
 
 ## Hard Constraints
 
-- **Never write code yourself**. Any code change must be delegated to an implementation agent.
-- **No direct grep/glob for non-trivial exploration**. Delegate discovery to `explore`.
-- **No external docs guessing**. Delegate external library/API lookups to `librarian`.
-- **Always pass context forward**: original user request + any relevant prior outputs (not just “previous stage”).
-- **Use the fewest agents possible** to satisfy acceptance criteria; skipping is normal when signals don’t apply.
+- **Claude is the default executor.** Do the work yourself unless one of the three
+  grounds below holds. When you delegate, name the ground in the same breath.
+- **Always pass context forward** — the original user request plus any relevant prior
+  output, not just the previous stage's.
+- **Use the fewest agents possible** to satisfy the acceptance criteria. Consulting
+  nobody is a normal outcome.
+
+### Grounds for delegation (one must hold, and you name it)
+
+1. **3-strike escape** — the same approach has already failed twice. A different
+   vendor is a different prior, which is the whole point; a third identical attempt
+   from you is not. See `references/oracle.md`.
+2. **Context budget** — the read is large enough to crowd out the work it serves:
+   whole-subsystem sweeps, multi-thousand-line surveys, a corpus you would summarize
+   and then discard.
+3. **Adversarial verification** — the verdict turns on perspective diversity, so it
+   has to come from a model that did not author the thing being judged. You cannot
+   be both author and approver of the same pass.
+
+### Not grounds for delegation
+
+- "It's a code change." You write code.
+- "I should check where this lives." Search it — see the search order below.
+- "A specialist would do it better." Not without one of the three grounds; the
+  round trip costs more than the marginal quality on ordinary work.
+- "The task looks big." Size is not risk. Split it and do the parts.
+
+## Search Before Consulting
+
+`explore` exists for breadth you cannot hold, not for lookups. Your default search
+order, before any vendor call:
+
+1. **Code graph** — a project index (`.code-review-graph/`, `.graphify/`) when one is
+   present. In a linked git worktree these live at
+   `dirname $(git rev-parse --git-common-dir)`, not `--show-toplevel`; a query
+   returning 0 hits there means *absent*, not *not found*.
+2. **Grep / Glob** — for prose and for any known symbol. This is the right answer far
+   more often than a delegated search.
+3. **`explore`** — only when the sweep is wide enough to hit ground 2 above.
 
 ## Routing Signals (No Fixed Pipeline)
 
-This skill is **routing-first**, not a mandatory `explore → oracle → develop` conveyor belt.
+Routing-first, not an `explore → oracle → develop` conveyor belt.
 
-| Signal | Add this agent |
-|--------|----------------|
-| Code location/behavior unclear | `explore` |
-| External library/API usage unclear | `librarian` |
-| Risky change: multi-file/module, public API, data format/config, concurrency, security/perf, or unclear tradeoffs | `oracle` |
-| Implementation required | `develop` (or `frontend-ui-ux-engineer` / `document-writer`) |
+| Signal | Consult |
+|--------|---------|
+| Sweep too wide to hold in context (ground 2) | `explore` |
+| External library/API behavior you cannot verify from the repo | `librarian` |
+| Risky change *and* the tradeoff is genuinely open: multi-module, public API, data format, concurrency, security/perf | `oracle` |
+| Two failed attempts at the same fix (ground 1) | `oracle`, then a different vendor for the retry |
+| Authored work that needs a judge who did not write it (ground 3) | `oracle` (review mode) |
+| Implementation you have a stated ground to hand off | `develop` / `frontend-ui-ux-engineer` / `document-writer` |
 
-### Skipping Heuristics (Prefer Explicit Risk Signals)
+Skip `oracle` when the change is local and low-risk. Line count is a weak signal;
+open tradeoffs are the real gate.
 
-- Skip `explore` when the user already provided exact file path + line number, or you already have it from context.
-- Skip `oracle` when the change is **local + low-risk** (single area, clear fix, no tradeoffs). Line count is a weak signal; risk is the real gate.
-- Skip implementation agents when the user only wants analysis/answers (stop after `explore`/`librarian`).
-
-### Common Recipes (Examples, Not Rules)
-
-- Explain code: `explore`
-- Small localized fix with exact location: `develop`
-- Bug fix, location unknown: `explore → develop`
-- Cross-cutting refactor / high risk: `explore → oracle → develop` (optionally `oracle` again for review)
-- External API integration: `explore` + `librarian` (can run in parallel) → `oracle` (if risk) → implementation agent
-- UI-only change: `explore → frontend-ui-ux-engineer` (split logic to `develop` if needed)
-- Docs-only change: `explore → document-writer`
-
-## Agent Invocation Format
+## Vendor Invocation Format
 
 ```bash
 codeagent-wrapper --agent <agent_name> - <workdir> <<'EOF'
 ## Original User Request
 <original request>
 
-## Context Pack (include anything relevant; write "None" if absent)
+## Context Pack (every slot is filled; write "None" when there is nothing)
 - Explore output: <...>
 - Librarian output: <...>
 - Oracle output: <...>
-- Known constraints: <tests to run, time budget, repo conventions, etc.>
+- Known constraints: <tests to run, time budget, repo conventions>
+- Delegation ground: <1 three-strike | 2 context budget | 3 adversarial verification>
 
 ## Current Task
 <specific task description>
@@ -63,217 +93,122 @@ codeagent-wrapper --agent <agent_name> - <workdir> <<'EOF'
 EOF
 ```
 
-Execute in shell tool, timeout 2h.
+Run it through the shell tool. Timeouts, reasoning-effort tiers, and vendor failure
+modes are in `references/vendor-ops.md` — read that before your first call in a
+session.
 
-## Examples (Routing by Task)
+**Every Context Pack slot is written out.** An empty slot says `None`; a missing slot
+says nothing at all, and the consumer cannot tell "there was no oracle pass" from
+"the oracle pass was dropped on the way here." The role cards declare the same
+contract from the other side under `## Input Contract (MANDATORY)`.
+
+## Examples
 
 <example>
 User: /omo fix this type error at src/foo.ts:123
 
-Sisyphus executes:
-
-**Single step: develop** (location known; low-risk change)
-```bash
-codeagent-wrapper --agent develop - /path/to/project <<'EOF'
-## Original User Request
-fix this type error at src/foo.ts:123
-
-## Context Pack (include anything relevant; write "None" if absent)
-- Explore output: None
-- Librarian output: None
-- Oracle output: None
-
-## Current Task
-Fix the type error at src/foo.ts:123 with the minimal targeted change.
-
-## Acceptance Criteria
-Typecheck passes; no unrelated refactors.
-EOF
-```
+**No delegation.** The location is given and no ground holds — read the file, make
+the change, run the typecheck. Consulting `develop` here would cost a round trip to
+have someone else do what you can already see.
 </example>
 
 <example>
 User: /omo analyze this bug and fix it (location unknown)
 
-Sisyphus executes:
+**Step 1 — search it yourself.** Code graph, then Grep for the symbol in the stack
+trace. An unknown location is not a wide sweep.
 
-**Step 1: explore**
-```bash
-codeagent-wrapper --agent explore - /path/to/project <<'EOF'
-## Original User Request
-analyze this bug and fix it
+**Step 2 — fix it yourself,** with the narrowest relevant test.
 
-## Context Pack (include anything relevant; write "None" if absent)
-- Explore output: None
-- Librarian output: None
-- Oracle output: None
-
-## Current Task
-Locate bug position, analyze root cause, collect relevant code context (thoroughness: medium).
-
-## Acceptance Criteria
-Output: problem file path, line numbers, root cause analysis, relevant code snippets.
-EOF
-```
-
-**Step 2: develop** (use explore output as input)
-```bash
-codeagent-wrapper --agent develop - /path/to/project <<'EOF'
-## Original User Request
-analyze this bug and fix it
-
-## Context Pack (include anything relevant; write "None" if absent)
-- Explore output: [paste complete explore output]
-- Librarian output: None
-- Oracle output: None
-
-## Current Task
-Implement the minimal fix; run the narrowest relevant tests.
-
-## Acceptance Criteria
-Fix is implemented; tests pass; no regressions introduced.
-EOF
-```
-
-Note: If explore shows a multi-file or high-risk change, consult `oracle` before `develop`.
+Escalate only if step 2 fails twice on the same approach; then ground 1 holds and
+`oracle` gets the two failed attempts *and* what you observed, not just the symptom.
 </example>
 
 <example>
-User: /omo add feature X using library Y (need internal context + external docs)
+User: /omo this fix has failed twice — the test still hangs
 
-Sisyphus executes:
+Ground 1 holds. Consult `oracle` with both attempts.
 
-**Step 1a: explore** (internal codebase)
-```bash
-codeagent-wrapper --agent explore - /path/to/project <<'EOF'
-## Original User Request
-add feature X using library Y
-
-## Context Pack (include anything relevant; write "None" if absent)
-- Explore output: None
-- Librarian output: None
-- Oracle output: None
-
-## Current Task
-Find where feature X should hook in; identify existing patterns and extension points.
-
-## Acceptance Criteria
-Output: file paths/lines for hook points; current flow summary; constraints/edge cases.
-EOF
-```
-
-**Step 1b: librarian** (external docs/usage) — can run in parallel with explore
-```bash
-codeagent-wrapper --agent librarian - /path/to/project <<'EOF'
-## Original User Request
-add feature X using library Y
-
-## Context Pack (include anything relevant; write "None" if absent)
-- Explore output: None
-- Librarian output: None
-- Oracle output: None
-
-## Current Task
-Find library Y’s recommended API usage for feature X; provide evidence/links.
-
-## Acceptance Criteria
-Output: minimal usage pattern; API pitfalls; version constraints; links to authoritative sources.
-EOF
-```
-
-**Step 2: oracle** (optional but recommended if multi-file/risky)
 ```bash
 codeagent-wrapper --agent oracle - /path/to/project <<'EOF'
 ## Original User Request
-add feature X using library Y
+the async teardown test still hangs after two fix attempts
 
-## Context Pack (include anything relevant; write "None" if absent)
-- Explore output: [paste explore output]
-- Librarian output: [paste librarian output]
-- Oracle output: None
-
-## Current Task
-Propose the minimal implementation plan and file touch list; call out risks.
-
-## Acceptance Criteria
-Output: concrete plan; files to change; risk/edge cases; effort estimate.
-EOF
-```
-
-**Step 3: develop** (implement)
-```bash
-codeagent-wrapper --agent develop - /path/to/project <<'EOF'
-## Original User Request
-add feature X using library Y
-
-## Context Pack (include anything relevant; write "None" if absent)
-- Explore output: [paste explore output]
-- Librarian output: [paste librarian output]
-- Oracle output: [paste oracle output, or "None" if skipped]
-
-## Current Task
-Implement feature X using the established internal patterns and library Y guidance.
-
-## Acceptance Criteria
-Feature works end-to-end; tests pass; no unrelated refactors.
-EOF
-```
-</example>
-
-<example>
-User: /omo how does this function work?
-
-Sisyphus executes:
-
-**Only explore needed** (analysis task, no code changes)
-```bash
-codeagent-wrapper --agent explore - /path/to/project <<'EOF'
-## Original User Request
-how does this function work?
-
-## Context Pack (include anything relevant; write "None" if absent)
+## Context Pack (every slot is filled; write "None" when there is nothing)
 - Explore output: None
 - Librarian output: None
 - Oracle output: None
+- Known constraints: pytest -k teardown must pass; no new dependencies
+- Delegation ground: 1 three-strike
+
+## Prior Attempts (required for ground 1)
+1. Awaited the cleanup task in the fixture — still hangs, no traceback.
+2. Moved cleanup to an atexit handler — hangs before atexit runs.
+Observed: the hang is before teardown, not inside it.
 
 ## Current Task
-Analyze function implementation and call chain
+Name the mechanism that would hang before teardown, and the cheapest probe that
+distinguishes your hypotheses.
 
 ## Acceptance Criteria
-Output: function signature, core logic, call relationship diagram
+Competing hypotheses with a discriminating probe for each. Not a patch.
 EOF
 ```
+
+Then *you* run the probe and make the fix.
+</example>
+
+<example>
+User: /omo how does the auth middleware work?
+
+**No delegation.** Read it. An explanation task on code you can open is not a
+delegation ground.
+</example>
+
+<example>
+User: /omo audit every call site of `serialize()` across the monorepo — 400+ files
+
+Ground 2 holds: the sweep is wider than your budget for the work it serves.
+
+Consult `explore` for the inventory, then judge the results yourself. `explore`
+returns locations; it does not decide which call sites are wrong.
 </example>
 
 <anti_example>
-User: /omo fix this type error
+User: /omo add rate limiting to the API
 
-Wrong approach:
-- Always run `explore → oracle → develop` mechanically
-- Use grep to find files yourself
-- Modify code yourself
-- Invoke develop without passing context
+Wrong:
+- Consult `explore` to find the middleware (Grep finds it)
+- Consult `oracle` because "it touches the API" (no open tradeoff yet)
+- Consult `develop` to write the change (you write code)
 
-Correct approach:
-- Route based on signals: if location is known and low-risk, invoke `develop` directly
-- Otherwise invoke `explore` to locate the problem (or to confirm scope), then delegate implementation
-- Invoke the implementation agent with a complete Context Pack
+Right:
+- Find the middleware yourself, read the surrounding pattern, write the change
+- Consult `oracle` only if a real tradeoff surfaces — per-account vs global limits
+  with no obvious winner — and say so
 </anti_example>
 
 ## Forbidden Behaviors
 
-- **FORBIDDEN** to write code yourself (must delegate to implementation agent)
-- **FORBIDDEN** to invoke an agent without the original request and relevant Context Pack
-- **FORBIDDEN** to skip agents and use grep/glob for complex analysis
-- **FORBIDDEN** to treat `explore → oracle → develop` as a mandatory workflow
+- **FORBIDDEN** to delegate without naming which of the three grounds holds.
+- **FORBIDDEN** to invoke a role without the original request and a complete
+  Context Pack.
+- **FORBIDDEN** to approve your own work. The reviewing pass and the authoring pass
+  are different passes, and under ground 3 a different model.
+- **FORBIDDEN** to treat `explore → oracle → develop` as a mandatory workflow.
+- **FORBIDDEN** to report a vendor's output as a result. It is advice; you verify it
+  against the repo before acting on it.
 
-## Agent Selection
+## Role Catalog
 
-| Agent | When to Use |
-|-------|---------------|
-| `explore` | Need to locate code position or understand code structure |
-| `oracle` | Risky changes, tradeoffs, unclear requirements, or after failed attempts |
-| `develop` | Backend/logic code implementation |
-| `frontend-ui-ux-engineer` | UI/styling/frontend component implementation |
-| `document-writer` | Documentation/README writing |
-| `librarian` | Need to lookup external library docs or OSS examples |
+Each card in `references/` opens with `## Input Contract (MANDATORY)` — what the role
+requires — and closes with `## NOT Your Job` — what it must hand back to you.
+
+| Role | Consult when |
+|------|--------------|
+| `explore` | The sweep is wider than your context budget (ground 2) |
+| `oracle` | An open tradeoff, a two-failure escape, or an adversarial review |
+| `develop` | Backend/logic implementation you have a stated ground to hand off |
+| `frontend-ui-ux-engineer` | UI/styling implementation, same condition |
+| `document-writer` | Documentation writing, same condition |
+| `librarian` | External library behavior you cannot verify from the repo |

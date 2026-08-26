@@ -38,7 +38,7 @@
     },
     "omo": {
       "enabled": true,
-      "description": "OmO multi-agent orchestration with Sisyphus coordinator",
+      "description": "omo role-based vendor consultation; the Claude session executes",
       "agents": {
         "oracle": {
           "backend": "claude",
