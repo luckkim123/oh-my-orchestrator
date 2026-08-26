@@ -52,6 +52,14 @@ def write_tasks(root: Path, tasks: list[dict], **extra) -> None:
     (root / "harness-tasks.json").write_text(json.dumps(state), encoding="utf-8")
 
 
+def write_board(root: Path, tasks: list[dict], status: str = "active", **extra) -> None:
+    """Write .orchestration/board.json -- the migrated state file."""
+    d = root / ".orchestration"
+    d.mkdir(parents=True, exist_ok=True)
+    board = {"status": status, "owning_session": "test", "tasks": tasks, **extra}
+    (d / "board.json").write_text(json.dumps(board), encoding="utf-8")
+
+
 def activate(root: Path) -> None:
     (root / ".harness-active").touch()
 
@@ -866,6 +874,72 @@ class TestSelfReflectStopHook(unittest.TestCase):
         )
         data = json.loads(stdout)
         self.assertEqual(data["decision"], "block")
+
+
+class TestBoardGate(unittest.TestCase):
+    """The activation gate is board.json.status, not a marker file."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.root = Path(self.tmpdir)
+        (self.root / "harness-progress.txt").write_text("")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _payload(self, **extra):
+        return {"cwd": self.tmpdir, **extra}
+
+    def test_active_board_blocks_without_marker(self):
+        """A board with status active gates the hooks -- no .harness-active needed."""
+        write_board(self.root, [
+            {"id": "t1", "status": "pending", "priority": "P0", "title": "Do it"},
+        ])
+        self.assertFalse((self.root / ".harness-active").exists())
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        data = json.loads(stdout)
+        self.assertEqual(data["decision"], "block")
+        self.assertIn("Do it", data["reason"])
+
+    def test_closed_board_is_a_noop(self):
+        """A closed campaign keeps its board on disk; presence must not mean active."""
+        write_board(self.root, [
+            {"id": "t1", "status": "pending", "priority": "P0"},
+        ], status="closed")
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+
+    def test_board_wins_over_legacy_state(self):
+        """When both exist, the board is the state file hooks read."""
+        write_tasks(self.root, [{"id": "legacy", "status": "pending", "priority": "P0",
+                                 "title": "Legacy task"}])
+        write_board(self.root, [{"id": "t1", "status": "pending", "priority": "P0",
+                                 "title": "Board task"}])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        data = json.loads(stdout)
+        self.assertIn("Board task", data["reason"])
+        self.assertNotIn("Legacy task", data["reason"])
+
+    def test_legacy_root_still_uses_marker(self):
+        """A project that has not migrated keeps working on .harness-active."""
+        write_tasks(self.root, [{"id": "t1", "status": "pending", "priority": "P0",
+                                 "title": "Unmigrated"}])
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(stdout, "", "no marker, no board -> inactive")
+        activate(self.root)
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertIn("Unmigrated", json.loads(stdout)["reason"])
+
+    def test_corrupt_board_fails_closed(self):
+        """A board that will not parse is not an active one."""
+        d = self.root / ".orchestration"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "board.json").write_text("{not json", encoding="utf-8")
+        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "", "a broken board must not leave hooks firing")
 
 
 if __name__ == "__main__":

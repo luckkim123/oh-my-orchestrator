@@ -11,6 +11,16 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+# Board resolution and the activation gate live in one place; a hook that carried
+# its own copy would drift the moment the gate changed. Missing helper module =>
+# every hook is a no-op, which is the fail-open contract.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import _harness_common as hc
+except ImportError:
+    hc = None  # type: ignore[assignment]
+
+
 
 def _utc_now() -> _dt.datetime:
     return _dt.datetime.now(tz=_dt.timezone.utc)
@@ -33,36 +43,10 @@ def _read_payload() -> dict[str, Any]:
 
 
 def _find_state_root(payload: dict[str, Any]) -> Optional[Path]:
-    state_root = os.environ.get("HARNESS_STATE_ROOT")
-    if state_root:
-        p = Path(state_root)
-        if (p / "harness-tasks.json").is_file():
-            try:
-                return p.resolve()
-            except Exception:
-                return p
-
-    candidates: list[Path] = []
-    env_dir = os.environ.get("CLAUDE_PROJECT_DIR")
-    if env_dir:
-        candidates.append(Path(env_dir))
-
-    cwd = payload.get("cwd") or os.getcwd()
-    candidates.append(Path(cwd))
-
-    seen: set[str] = set()
-    for base in candidates:
-        try:
-            base = base.resolve()
-        except Exception:
-            continue
-        if str(base) in seen:
-            continue
-        seen.add(str(base))
-        for parent in [base, *list(base.parents)[:8]]:
-            if (parent / "harness-tasks.json").is_file():
-                return parent
-    return None
+    """Locate the root holding .orchestration/board.json or harness-tasks.json."""
+    if hc is None:
+        return None
+    return hc.find_harness_root(payload)
 
 
 def _lockdir_for_root(root: Path) -> Path:
@@ -163,7 +147,7 @@ def main() -> int:
         return 0
     lease_seconds = int(os.environ.get("HARNESS_LEASE_SECONDS") or "1800")
 
-    tasks_path = root / "harness-tasks.json"
+    tasks_path = hc.state_path(root) if hc else (root / "harness-tasks.json")
     lockdir = _lockdir_for_root(root)
 
     timeout_s = float(os.environ.get("HARNESS_LOCK_TIMEOUT_SECONDS") or "5")

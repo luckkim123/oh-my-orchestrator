@@ -51,7 +51,7 @@ def _find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
     state_root = os.environ.get("HARNESS_STATE_ROOT")
     if state_root:
         p = Path(state_root)
-        if (p / "harness-tasks.json").is_file():
+        if hc is not None and hc._has_marker(p):
             try:
                 return p.resolve()
             except Exception:
@@ -71,7 +71,7 @@ def _find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
             continue
         seen.add(str(base))
         for parent in [base, *list(base.parents)[:8]]:
-            if (parent / "harness-tasks.json").is_file():
+            if hc is not None and hc._has_marker(parent):
                 return parent
     return None
 

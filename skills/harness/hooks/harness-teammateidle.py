@@ -13,6 +13,16 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+# Board resolution and the activation gate live in one place; a hook that carried
+# its own copy would drift the moment the gate changed. Missing helper module =>
+# every hook is a no-op, which is the fail-open contract.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import _harness_common as hc
+except ImportError:
+    hc = None  # type: ignore[assignment]
+
+
 
 def _read_hook_payload() -> dict[str, Any]:
     raw = sys.stdin.read()
@@ -26,33 +36,10 @@ def _read_hook_payload() -> dict[str, Any]:
 
 
 def _find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
-    state_root = os.environ.get("HARNESS_STATE_ROOT")
-    if state_root:
-        p = Path(state_root)
-        if (p / "harness-tasks.json").is_file():
-            try:
-                return p.resolve()
-            except Exception:
-                return p
-    candidates: list[Path] = []
-    env_dir = os.environ.get("CLAUDE_PROJECT_DIR")
-    if env_dir:
-        candidates.append(Path(env_dir))
-    cwd = payload.get("cwd") or os.getcwd()
-    candidates.append(Path(cwd))
-    seen: set[str] = set()
-    for base in candidates:
-        try:
-            base = base.resolve()
-        except Exception:
-            continue
-        if str(base) in seen:
-            continue
-        seen.add(str(base))
-        for parent in [base, *list(base.parents)[:8]]:
-            if (parent / "harness-tasks.json").is_file():
-                return parent
-    return None
+    """Locate the root holding .orchestration/board.json or harness-tasks.json."""
+    if hc is None:
+        return None
+    return hc.find_harness_root(payload)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -68,8 +55,14 @@ def _priority_rank(v: Any) -> int:
 
 
 def _is_harness_active(root: Path) -> bool:
-    """Check if harness skill is actively running (marker file exists)."""
-    return (root / ".harness-active").is_file()
+    """True when hooks are live: board.json.status == "active".
+
+    A closed campaign keeps its board on disk, so presence cannot mean active.
+    Roots that have not migrated still gate on the .harness-active marker.
+    """
+    if hc is None:
+        return False
+    return hc.is_harness_active(root)
 
 
 def main() -> int:
@@ -82,7 +75,7 @@ def main() -> int:
     if not _is_harness_active(root):
         return 0
 
-    tasks_path = root / "harness-tasks.json"
+    tasks_path = hc.state_path(root) if hc else (root / "harness-tasks.json")
     try:
         state = _load_json(tasks_path)
         tasks_raw = state.get("tasks") or []

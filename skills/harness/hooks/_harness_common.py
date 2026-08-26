@@ -103,8 +103,20 @@ def maybe_log_hook_event(root: Path, payload: dict[str, Any], hook_script: str) 
 # State root discovery
 # ---------------------------------------------------------------------------
 
+BOARD_REL = ".orchestration/board.json"
+LEGACY_STATE = "harness-tasks.json"
+
+# Board file names a root, in preference order. A project that has migrated
+# carries the board; one that has not still carries the legacy state file.
+ROOT_MARKERS = (BOARD_REL, LEGACY_STATE)
+
+
+def _has_marker(base: Path) -> bool:
+    return any((base / m).is_file() for m in ROOT_MARKERS)
+
+
 def find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
-    """Locate the directory containing harness-tasks.json.
+    """Locate the directory holding .orchestration/board.json or harness-tasks.json.
 
     Search order:
     1. HARNESS_STATE_ROOT env var
@@ -114,7 +126,7 @@ def find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
     env_root = os.environ.get("HARNESS_STATE_ROOT")
     if env_root:
         p = Path(env_root)
-        if (p / "harness-tasks.json").is_file():
+        if _has_marker(p):
             try:
                 return p.resolve()
             except Exception:
@@ -137,14 +149,65 @@ def find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
             continue
         seen.add(str(base))
         for parent in [base, *list(base.parents)[:8]]:
-            if (parent / "harness-tasks.json").is_file():
+            if _has_marker(parent):
                 return parent
     return None
 
 
+# ---------------------------------------------------------------------------
+# Board (.orchestration/board.json)
+# ---------------------------------------------------------------------------
+
+def board_path(root: Path) -> Path:
+    return root / ".orchestration" / "board.json"
+
+
+def state_path(root: Path) -> Path:
+    """The file hooks read: the board when it exists, else the legacy state."""
+    bp = board_path(root)
+    return bp if bp.is_file() else (root / LEGACY_STATE)
+
+
+def load_state(root: Path) -> dict[str, Any]:
+    """Load whichever state file this root carries. Raises on malformed JSON."""
+    return load_json(state_path(root))
+
+
 def is_harness_active(root: Path) -> bool:
-    """True when .harness-active marker exists (hooks are live)."""
+    """True when hooks are live for this root.
+
+    The gate is `board.json.status == "active"`. It is a status bit rather than a
+    marker file because a closed campaign's board stays on disk -- posts are kept
+    by convention -- so presence cannot mean active.
+
+    A root that has not migrated still gates on the .harness-active marker.
+    """
+    bp = board_path(root)
+    if bp.is_file():
+        try:
+            return str(load_json(bp).get("status") or "").strip() == "active"
+        except Exception:
+            # A corrupt board is not an active one. The stop hook reports the
+            # parse failure separately; here, fail closed so a broken file does
+            # not leave every hook firing.
+            return False
     return (root / ".harness-active").is_file()
+
+
+def board_workers(state: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = state.get("workers")
+    return [w for w in raw if isinstance(w, dict)] if isinstance(raw, list) else []
+
+
+def find_worker(state: dict[str, Any], role: str) -> Optional[dict[str, Any]]:
+    """Look up a worker row by role name. Roles are unique on the board."""
+    role = str(role or "").strip()
+    if not role:
+        return None
+    for w in board_workers(state):
+        if str(w.get("role") or "").strip() == role:
+            return w
+    return None
 
 
 # ---------------------------------------------------------------------------

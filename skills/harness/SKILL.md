@@ -26,17 +26,52 @@ Executable protocol enabling any agent task to run continuously across multiple 
 /harness add "task description"  # Add a task to the list
 ```
 
-## Activation Marker
+## Activation Gate
 
-Hooks only take effect when `.harness-active` marker file exists in the harness root (same directory as `harness-tasks.json`).
+Hooks take effect only when `.orchestration/board.json` reads `"status": "active"`.
 
-- `/harness init` and `/harness run` MUST create this marker: `touch <project-path>/.harness-active`
-- When all tasks complete (no pending/in_progress/retryable left), remove it: `rm <project-path>/.harness-active`
-- Without this marker, all hooks are no-ops — they exit 0 immediately
+A closed campaign keeps its board on disk — preserving the posts is the convention —
+so *presence* of the file cannot mean active. The gate has to be a status bit.
+
+- `/harness init` and `/harness run` set `status: "active"`.
+- When no eligible task remains, set `status: "closed"`. Do not delete the board.
+- Any other value, a missing board, or a board that will not parse: every hook exits
+  0 immediately. A broken board is not an active one.
+
+**Legacy roots.** A project that still has `harness-tasks.json` and no
+`.orchestration/` keeps gating on the old `.harness-active` marker file, and hooks
+read `harness-tasks.json` as before. When both exist, the board wins. Migrate by
+writing `.orchestration/board.json` and removing the marker.
+
+## Board (`.orchestration/board.json`)
+
+The only state the hooks read. Seed: `templates/orchestration/board.json`.
+
+| Field | Meaning |
+|---|---|
+| `status` | `active` \| `closed` — the activation gate above |
+| `owning_session` | Who launched this campaign |
+| `cost.estimated_tokens` / `cost.actual_tokens` | The ledger. Estimated at launch, actual at close; `null` until then |
+| `workers[]` | `role`, `vendor`, `model`, `writes_repo`, `worktree`, `status`, `orca_dispatch_id` |
+| `tasks[]` | As in the schema below — ids, deps, attempts, validation, rollback commit |
+
+`workers[].status` is `planned` → `claimed` → `reported` → `closed`. These are
+campaign terms, not process terms: a board file cannot know whether a process is
+running, and Orca's own worker state has nine values including three-way liveness.
+Copying process state here would put two sources of truth on one fact.
+
+`orca_dispatch_id` is an **opaque pointer**, and `null` is a normal value. It is the
+only seam to Orca and it is one-directional. Do not mirror Orca state into the board:
+the harness has to run without Orca, and a hook that needs a live Orca runtime to
+evaluate the gate hard-fails on any machine that does not have one.
 
 ## Progress Persistence (Dual-File System)
 
-Maintain two files in the project working directory:
+Two files, side by side: `.orchestration/board.json` holds structured state, and
+`harness-progress.txt` holds the free-text log. The board says what is true now; the
+log says what happened. Neither substitutes for the other -- a failure count read
+only from the board is a self-report, which is why the Stop hook cross-checks it
+against the log's ERROR lines.
 
 ### harness-progress.txt (Append-Only Log)
 
@@ -55,7 +90,11 @@ Free-text log of all agent actions across sessions. Never truncate.
 [2025-07-01T10:20:02Z] [SESSION-1] STATS tasks_total=5 completed=1 failed=1 pending=3 blocked=0 attempts_total=2 checkpoints=1
 ```
 
-### harness-tasks.json (Structured State)
+### `.orchestration/board.json` `tasks[]` (Structured State)
+
+The shape below is the `tasks[]` array of the board, plus `session_config` and the
+session counters, which live at the board's top level alongside `status`, `workers`,
+and `cost`. Legacy roots carry the same object as `harness-tasks.json`.
 
 ```json
 {
@@ -363,10 +402,19 @@ At session end, update `harness-tasks.json`: set `last_session` to current times
 
 ## Init Command (`/harness init`)
 
-1. Create `harness-progress.txt` with initialization entry
-2. Create `harness-tasks.json` with empty task list and default `session_config`
-3. Optionally create `harness-init.sh` template (chmod +x)
-4. Ask user: add harness files to `.gitignore`?
+1. Create `.orchestration/` and seed it from `templates/orchestration/`:
+   - `board.json` — `status: "active"`, empty `tasks`/`workers`, `cost.actual_tokens: null`
+   - `HUB.md` — the prose half: goal, the requester's words verbatim, decision table
+   - `rules/` — the payload vendor workers load on every task
+   - `knowledge/libraries/_TEMPLATE.md` — the fixed section schema
+2. Create the empty working directories: `posts/`, `sessions/`, `agents/`
+3. Create `harness-progress.txt` with an initialization entry
+4. Install the vendor loaders for whichever CLIs this project uses, from
+   `templates/vendor/` — see `omo`'s `references/shared-context.md`
+5. Optionally create `harness-init.sh` template (chmod +x)
+6. Ask the user: add `.orchestration/board.json` and `harness-progress.txt` to
+   `.gitignore`? The posts and `HUB.md` are usually worth committing — they are the
+   record; the board and the log are runtime state.
 
 ## Status Command (`/harness status`)
 

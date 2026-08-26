@@ -1,0 +1,42 @@
+{
+  "_comment": "Seed for .orchestration/board.json -- the only state the hooks read. Delete _comment fields once real. status is the activation gate: every hook exits 0 immediately unless it reads \"active\".",
+
+  "status": "active",
+  "owning_session": "replace-with-session-name",
+  "launched_at": "YYYY-MM-DD",
+
+  "cost": {
+    "estimated_tokens": 0,
+    "actual_tokens": null
+  },
+
+  "workers": [
+    {
+      "_comment": "status uses campaign terms, not process terms. A worker is planned before it is dispatched, claimed once it takes the work, reported once its post lands, closed when the manager accepts it. 'running' would be a process fact this file cannot know.",
+      "role": "lit-critic",
+      "vendor": "codex",
+      "model": "gpt-5.2",
+      "writes_repo": false,
+      "worktree": null,
+      "status": "planned",
+      "orca_dispatch_id": null
+    }
+  ],
+
+  "tasks": [
+    {
+      "id": "t1",
+      "title": "replace me",
+      "status": "pending",
+      "owner": "lit-critic",
+      "depends_on": [],
+      "attempts": 0,
+      "max_attempts": 3,
+      "started_at_commit": null,
+      "validation": {
+        "command": null,
+        "timeout_seconds": 300
+      }
+    }
+  ]
+}
