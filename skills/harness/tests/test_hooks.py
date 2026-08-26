@@ -746,6 +746,47 @@ class TestSelfReflectStopHook(unittest.TestCase):
         """Create .harness-reflect marker (simulates harness completion)."""
         (self.root / ".harness-reflect").touch()
 
+    def _transcript(self, text):
+        """A transcript line in Claude Code's real shape: content under message."""
+        tp = self.root / "transcript.jsonl"
+        tp.write_text(json.dumps({
+            "type": "user",
+            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+        }) + "\n", encoding="utf-8")
+        return str(tp)
+
+    def test_original_prompt_is_read_from_message_content(self):
+        """entry["content"] does not exist; the request lives at entry["message"]["content"]."""
+        write_tasks(self.root, [{"id": "t1", "status": "completed"}])
+        self._set_reflect()
+        tp = self._transcript("BUILD THE WIDGET")
+        _, stdout, _ = run_hook(REFLECT_HOOK, self._payload(
+            session_id="test-reflect-prompt", transcript_path=tp))
+        self.assertIn("BUILD THE WIDGET", json.loads(stdout)["reason"],
+                      "the reflect prompt shipped without the original request")
+
+    def test_sentinel_ends_the_loop(self):
+        """The prompt promises that finishing ends it; the sentinel is what makes that true."""
+        write_tasks(self.root, [{"id": "t1", "status": "completed"}])
+        self._set_reflect()
+        code, stdout, _ = run_hook(REFLECT_HOOK, self._payload(
+            session_id="test-reflect-done",
+            last_assistant_message="All five checks pass, nothing outstanding.\nREFLECT-DONE"))
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "", "the sentinel must end the loop, not shorten it")
+        self.assertFalse((self.root / ".harness-reflect").exists(),
+                         "the marker must be cleared so it does not re-trigger")
+
+    def test_without_sentinel_it_still_blocks(self):
+        write_tasks(self.root, [{"id": "t1", "status": "completed"}])
+        self._set_reflect()
+        _, stdout, _ = run_hook(REFLECT_HOOK, self._payload(
+            session_id="test-reflect-noexit",
+            last_assistant_message="I think everything is fine."))
+        data = json.loads(stdout)
+        self.assertEqual(data["decision"], "block")
+        self.assertIn("REFLECT-DONE", data["reason"], "the exit must be named in the prompt")
+
     def test_no_harness_root_is_noop(self):
         """When harness-tasks.json doesn't exist, hook is a complete no-op."""
         code, stdout, stderr = run_hook(REFLECT_HOOK, self._payload())

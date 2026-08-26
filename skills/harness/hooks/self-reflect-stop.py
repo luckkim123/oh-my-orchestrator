@@ -29,6 +29,12 @@ except ImportError:
 
 DEFAULT_MAX_ITERATIONS = 5
 
+# The loop's own prompt has always told the model that finishing is enough to end
+# it. Until 2026-08-26 nothing read that answer back, so the only exit was the
+# counter and every run paid all five iterations. A demand the model cannot
+# discharge is the same defect the cost gate had.
+DONE_SENTINEL = "REFLECT-DONE"
+
 
 def _read_payload() -> dict[str, Any]:
     raw = sys.stdin.read()
@@ -115,10 +121,16 @@ def _extract_original_prompt(transcript_path: str, max_bytes: int = 100_000) -> 
                     continue
                 if not isinstance(entry, dict):
                     continue
-                # Claude Code transcript 格式：role + content
-                role = entry.get("role") or entry.get("type", "")
+                # Claude Code writes {"type": "user", "message": {"role": ..,
+                # "content": ..}}. Reading entry["content"] finds nothing and the
+                # function silently returns "" for every transcript, which is why
+                # the reflect prompt shipped without the original request.
+                message = entry.get("message")
+                if not isinstance(message, dict):
+                    message = {}
+                role = message.get("role") or entry.get("role") or entry.get("type", "")
                 if role == "user":
-                    content = entry.get("content", "")
+                    content = message.get("content", entry.get("content", ""))
                     if isinstance(content, list):
                         # content 可能是 list of blocks
                         texts = []
@@ -155,6 +167,15 @@ def main() -> int:
         return 0
 
     if not (root / ".harness-reflect").is_file():
+        return 0
+
+    # The model's way out. It is checked before the counter so that answering the
+    # checklist honestly costs one iteration, not five.
+    if DONE_SENTINEL in str(payload.get("last_assistant_message") or ""):
+        try:
+            (root / ".harness-reflect").unlink(missing_ok=True)
+        except Exception:
+            pass
         return 0
 
     # 读取最大迭代次数
@@ -203,7 +224,10 @@ def main() -> int:
         "\n3. 代码质量：是否有可以改进的地方（可读性、性能、安全性）"
         "\n4. 是否需要补充测试或文档"
         "\n5. 最终确认：所有改动是否一致且不互相冲突"
-        "\n\n如果一切已完成，简要总结成果即可结束。如果发现问题，继续修复。"
+        "\n\nFound something? Fix it and this checklist runs again."
+        "\n**Nothing left? Summarise what was done and end that summary with the line "
+        f"`{DONE_SENTINEL}` on its own.** That is what ends the loop -- without it this "
+        f"prompt returns up to {max_iter} times, whatever you answer."
     )
 
     parts.append(
