@@ -52,6 +52,8 @@ are in progress.
 |---|---|
 | `skills/omo` | Role-scoped vendor orchestration and the delegation gate |
 | `skills/harness` | The enforcement layer: blocking checks, safety valve, claim locks |
+| `templates/orchestration/` | Seeds a project's `.orchestration/` shared knowledge store |
+| `templates/vendor/` | Vendor-side loader configs, so a worker reads the store on every task |
 
 Other upstream modules (`bmad`, `requirements`, `sparv`, `do`, `course`,
 `dev-kit`, `claudekit`) ship disabled in `config.json`. Their directories are
