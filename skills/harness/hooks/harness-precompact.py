@@ -37,7 +37,27 @@ def main() -> int:
     payload = hc.read_hook_payload()
 
     root = hc.find_harness_root(payload)
-    if root is None or not hc.is_harness_active(root):
+    if root is None:
+        return 0
+
+    # store-spec.md §6 row 4 asks for stderr + exit 2 on a corrupt gate, which
+    # is what the other five harness hooks do. This hook deliberately does not
+    # follow that here: its own docstring above measured that PreCompact CAN
+    # block (unlike SubagentStart) and has no stop_hook_active-style loop
+    # guard, so a wrong block strands the session at the context ceiling --
+    # "the worst place in a session to be stuck". A corrupt gate is exactly
+    # the kind of wrong-more-often-than-right condition that guard exists to
+    # avoid blocking on. So: stay loud, stay non-blocking -- reuse this
+    # hook's own systemMessage channel instead of sys.exit(2).
+    corrupt_reason = hc.gate_corrupt_reason(root)
+    if corrupt_reason is not None:
+        hc.emit_json({
+            "continue": True,
+            "systemMessage": f"HARNESS: gate corrupt — {corrupt_reason}",
+        })
+        return 0
+
+    if not hc.is_harness_active(root):
         return 0
 
     board = hc.board_path(root)

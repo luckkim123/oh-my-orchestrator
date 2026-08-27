@@ -75,12 +75,34 @@ A vendor that can rewrite the rules it was given is not constrained by them.
 |:---|:---|:---|
 | codex | `.codex/config.toml` with a `[[skills.config]]` block per skill, plus `.codex/skills/{context-loader,decision-record}/` | `templates/vendor/codex/` |
 | gemini | `.gemini/settings.json` with `experimental.skills = true`, plus `.gemini/skills/{context-loader,decision-record}/` | `templates/vendor/gemini/` |
-| antigravity | `.agents/skills/`, and `~/.gemini/antigravity-cli/skills/` for the user-scope copy | `templates/vendor/antigravity/` |
+| antigravity | `.agents/skills/{context-loader,decision-record}/` — **project scope only** | `templates/vendor/antigravity/` |
 | claude | **The session-config loader does not work here.** `backend/claude.go` passes `--setting-sources ""` to break the recursion loop, which also disables every user- and project-scope skill and the repo `CLAUDE.md`. Pass the rules with `--skills` instead | -- |
 
-**The antigravity paths are unverified.** The CLI was not installed on the machine
-where this was written, and `agy plugin import claude` was never run. Treat that row
-as a plan, not a measurement, until someone confirms it.
+**The antigravity row was measured 2026-08-27 and lost its user-scope half.** It
+previously also named `~/.gemini/antigravity-cli/skills/`, carrying a banner saying the
+paths were unverified because the CLI was absent when the row was written. `agy` is
+installed now, and the measurement reverses that half twice over:
+
+- **The path does not exist.** `~/.gemini/antigravity-cli/` holds `builtin/`, `plugins/`,
+  `brain/`, `conversations/`, `log/` — no `skills/`. `builtin/skills/` does exist but
+  carries a `.checksum` and holds agy's own shipped skills (`agy-customizations`,
+  `antigravity_guide`), so it is replaced on update: a cache, not an install target.
+- **The nearest real user-scope directory belongs to everyone.** `~/.agents/skills/` is
+  live, but its `.skill-lock.json` is the `vercel-labs/skills` cross-agent format and its
+  `lastSelectedAgents` lists `amp, antigravity, antigravity-cli, cline, codex, cursor,
+  deepagents, gemini-cli, github-copilot, ...`. Installing one project's loader there
+  pushes that project's rules into every agent on the machine — the opposite of what a
+  per-project loader is for.
+
+The project-scope path is confirmed by agy's own shipped documentation rather than by
+inference: `builtin/skills/agy-customizations/SKILL.md:42` gives the customization root
+as `.agents/` (or `.agent/`, `_agents/`, `_agent/`) **at the root of the project**, and
+`docs/skills.md:10` places skills at `<root>/skills/<name>/SKILL.md`.
+
+One thing that row does not carry, worth knowing when piece ① is wired for this vendor:
+agy reads rules from `GEMINI.md`, `AGENTS.md`, and `.agents/rules/*.md`
+(`agy-customizations/SKILL.md:49`) — `.agents/rules/` is the direct analogue of this
+store's `rules/`.
 
 **The claude row is the exception that costs something.** Measured 2026-08-27 with
 `claude --setting-sources "" -p`: only built-in skills are listed, and the repo

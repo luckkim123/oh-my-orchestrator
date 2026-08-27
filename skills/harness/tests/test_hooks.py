@@ -199,6 +199,121 @@ class TestNoHarnessRoot(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# store-spec.md §6 row 4 — the corrupt gate, end-to-end through real hooks
+# ---------------------------------------------------------------------------
+class TestCorruptGate(unittest.TestCase):
+    """A corrupt .hq/.anchor (duplicate id, unparseable .anchor, or an
+    unparseable board.json under a valid one) must fail loud -- stderr naming
+    the file, exit 2 -- not be silently read as an absent/inactive store the
+    way is_harness_active() alone would read it. hq.anchor.gate_state()'s own
+    4-state fixtures live in test_hq.py; this class is the other half the
+    plan's acceptance asks for -- that the hooks actually call it.
+
+    The fixture always carries harness-tasks.json + .harness-active (the
+    legacy markers _find_harness_root()/is_harness_active() key off), since a
+    root that doesn't resolve at all was already covered by
+    TestNoHarnessRoot -- the "off" row is unreachable at the hook-invocation
+    level for that reason (the hook returns 0 before ever calling
+    gate_corrupt_reason). The three rows exercised here as "still exit 0" are
+    the three that remain reachable: legacy (no .hq/.anchor -- today's actual
+    state for every real repo on this machine), normal with no board.json,
+    and normal with a board.json that parses.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.root = Path(self.tmpdir)
+        write_tasks(self.root, [
+            {"id": "t1", "title": "Pending task", "status": "pending", "priority": "P0", "depends_on": []},
+        ])
+        activate(self.root)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _payload(self, **extra):
+        return {"cwd": self.tmpdir, **extra}
+
+    def _write_anchor(self, anchor_id: str = "t1") -> None:
+        d = self.root / ".hq"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / ".anchor").write_text(f"id: {anchor_id}\n", encoding="utf-8")
+
+    def _write_board(self, content: str) -> None:
+        d = self.root / ".orchestration"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "board.json").write_text(content, encoding="utf-8")
+
+    def test_stop_exits_2_and_names_the_file_on_corrupt_gate(self):
+        self._write_anchor()
+        self._write_board("{invalid")
+        code, stdout, stderr = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 2)
+        self.assertIn("board.json", stderr)
+
+    def test_sessionstart_exits_2_on_corrupt_gate(self):
+        self._write_anchor()
+        self._write_board("{invalid")
+        code, stdout, stderr = run_hook(SESSION_HOOK, self._payload())
+        self.assertEqual(code, 2)
+        self.assertIn("board.json", stderr)
+
+    def test_teammateidle_exits_2_on_corrupt_gate(self):
+        self._write_anchor()
+        self._write_board("{invalid")
+        code, stdout, stderr = run_hook(IDLE_HOOK, self._payload())
+        self.assertEqual(code, 2)
+        self.assertIn("board.json", stderr)
+
+    def test_subagentstop_exits_2_on_corrupt_gate(self):
+        self._write_anchor()
+        self._write_board("{invalid")
+        code, stdout, stderr = run_hook(SUBAGENT_HOOK, self._payload())
+        self.assertEqual(code, 2)
+        self.assertIn("board.json", stderr)
+
+    def test_subagentstart_still_exits_2_though_it_cannot_block_the_spawn(self):
+        # This hook's own docstring measured that exit 2 does not stop the
+        # spawn and its stderr is invisible to the user -- wired anyway for
+        # uniformity (see the comment at its call site). The exit code itself
+        # is still the observable, testable half of that.
+        self._write_anchor()
+        self._write_board("{invalid")
+        code, stdout, stderr = run_hook(SUBAGENT_START_HOOK, self._payload(agent_type="t1"))
+        self.assertEqual(code, 2)
+        self.assertIn("board.json", stderr)
+
+    def test_precompact_stays_non_blocking_but_reports_via_systemmessage(self):
+        # Deliberately different from the other five: PreCompact CAN block
+        # (measured) and has no loop guard, so a wrong block strands the
+        # session at the context ceiling. It stays loud through its own
+        # systemMessage channel instead of sys.exit(2).
+        self._write_anchor()
+        self._write_board("{invalid")
+        code, stdout, stderr = run_hook(PRECOMPACT_HOOK, self._payload())
+        self.assertEqual(code, 0)
+        data = json.loads(stdout)
+        self.assertIn("board.json", data.get("systemMessage", ""))
+
+    def test_other_three_rows_still_exit_0_through_a_real_hook(self):
+        # legacy: no .hq/.anchor at all (today's actual state for every real
+        # repo -- neither live post store has one yet).
+        code, stdout, stderr = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0, stderr)
+
+        # normal: valid .hq/.anchor, no board.json under .orchestration/.
+        self._write_anchor()
+        code, stdout, stderr = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0, stderr)
+
+        # normal: valid .hq/.anchor AND a board.json that parses.
+        self._write_board("{}")
+        code, stdout, stderr = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 0, stderr)
+
+
+# ---------------------------------------------------------------------------
 # Stop Hook — Task State Logic
 # ---------------------------------------------------------------------------
 class TestStopHookTaskLogic(unittest.TestCase):

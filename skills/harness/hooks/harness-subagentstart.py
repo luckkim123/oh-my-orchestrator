@@ -139,7 +139,22 @@ def main() -> int:
     payload = hc.read_hook_payload()
 
     root = hc.find_harness_root(payload)
-    if root is None or not hc.is_harness_active(root):
+    if root is None:
+        return 0
+
+    # store-spec.md §6 row 4: a corrupt .hq/.anchor (or an unparseable
+    # board.json under one) must fail loud, not be silently read as an
+    # inactive/absent store the way is_harness_active() below reads it.
+    # (This hook's own docstring measured that exit 2 does not stop the
+    # spawn and its stderr is invisible -- wiring it anyway keeps behavior
+    # uniform with the other five hooks and costs nothing this hook does
+    # not already accept.)
+    corrupt_reason = hc.gate_corrupt_reason(root)
+    if corrupt_reason is not None:
+        sys.stderr.write(f"HARNESS: gate corrupt — {corrupt_reason}\n")
+        return 2
+
+    if not hc.is_harness_active(root):
         return 0
 
     role = str(payload.get("agent_type") or "").strip()

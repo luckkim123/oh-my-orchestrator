@@ -334,6 +334,28 @@ being read as an absent one.
 Acceptance requires a fixture for all four rows. "Swallow every failure" survives as the
 rule everywhere except row 4.
 
+### Row 4's one exception — `PreCompact` is loud without blocking (P1, 2026-08-27)
+
+Every hook implements row 4 as stderr plus exit 2, except `harness-precompact.py`, which
+emits `{"continue": true, "systemMessage": ...}` — its own existing loud channel, the one
+it already uses for HUB/board drift.
+
+The reason is measured and recorded in that hook's docstring: `PreCompact` **can** block,
+and unlike `SubagentStop` it has no `stop_hook_active`-style loop guard. A corrupt board
+is exactly the kind of condition that persists across retries, so a blocking exit there
+would make compaction impossible at the context ceiling — the one moment in a session
+with no way out. The user still sees the failure; only the blocking half is dropped.
+
+Read row 4 as **"never silent"** rather than "always exit 2". `SubagentStart` is the same
+distinction from the other side: it exits 2 for uniformity, but its own docstring records
+that exit 2 does not block a spawn and its stderr does not reach the user, so it is as
+loud as that hook can be rather than fully effective.
+
+Implementation: `hq/anchor.py` `gate_state()`, reached through
+`_harness_common.gate_corrupt_reason()`. `self-reflect-stop.py` is deliberately untouched
+— it gates on a `.harness-reflect` marker and never reads `board.json`, so it has no
+silent-failure branch to reverse.
+
 ---
 
 ## 7. Fallback, `--purge`, and who decides

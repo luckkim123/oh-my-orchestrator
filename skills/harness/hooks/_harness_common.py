@@ -194,6 +194,39 @@ def is_harness_active(root: Path) -> bool:
     return (root / ".harness-active").is_file()
 
 
+def gate_corrupt_reason(root: Path) -> Optional[str]:
+    """store-spec.md §6 row 4: a corrupt `.hq/.anchor` (duplicate anchor id,
+    unparseable `.anchor`, or a `board.json` that exists and will not parse)
+    must fail loud, not be read as an absent store. `is_harness_active()`
+    above reads a corrupt board as merely inactive -- correct for gating
+    "should this hook do work", but it is also the exact silent-failure this
+    function exists to surface separately, at hook entry, before that gate.
+
+    hq.anchor.gate_state() is the single implementation of the 4-state table
+    (off/legacy/normal/corrupt); this only translates its GATE_CORRUPT case
+    into the one-line reason a hook prints. Every other state (off, legacy,
+    normal) returns None here -- unchanged from what is_harness_active()
+    already does for those three.
+
+    Never raises. These hooks fire on every Stop/SessionStart/etc. in every
+    repo on this machine, harness or not; a traceback here -- a missing hq
+    package, a stale sys.path, anything -- must degrade to "not corrupt"
+    (today's behavior) rather than break every session on the machine. That
+    degradation is the load-bearing property, not a detail: the failure mode
+    being fixed (silent corruption) is strictly better than a hook that can no
+    longer run at all.
+    """
+    try:
+        harness_dir = str(Path(__file__).resolve().parent.parent)  # skills/harness/
+        if harness_dir not in sys.path:
+            sys.path.insert(0, harness_dir)
+        from hq import anchor as hq_anchor
+        state, reason = hq_anchor.gate_state(root)
+        return reason if state == hq_anchor.GATE_CORRUPT else None
+    except Exception:
+        return None
+
+
 def board_workers(state: dict[str, Any]) -> list[dict[str, Any]]:
     raw = state.get("workers")
     return [w for w in raw if isinstance(w, dict)] if isinstance(raw, list) else []

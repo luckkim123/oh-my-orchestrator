@@ -273,6 +273,14 @@ def main() -> int:
     if root is None:
         return 0  # no harness project, allow stop
 
+    # store-spec.md §6 row 4: a corrupt .hq/.anchor (or an unparseable
+    # board.json under one) must fail loud, not be silently read as an
+    # inactive/absent store the way _is_harness_active() below reads it.
+    corrupt_reason = hc.gate_corrupt_reason(root) if hc else None
+    if corrupt_reason is not None:
+        sys.stderr.write(f"HARNESS: gate corrupt — {corrupt_reason}\n")
+        return 2
+
     # Guard: only active when harness skill is triggered
     if not _is_harness_active(root):
         return 0

@@ -48,11 +48,11 @@ That is two of four states. The full gate is the pair (legacy `.om?` store,
 this section cannot express is "legacy store present, anchor absent" — migration not yet
 done — which must **warn and read via fallback** rather than fall quiet.
 
-> **Spec ahead of code.** The loud-failure branch is frozen in `store-spec.md`, not yet
-> implemented: `_harness_common.py:179-188` still returns a plain boolean and swallows a
-> parse error. Implementing it, with a fixture per row, is Phase 1 of the store
-> unification. Until then this section describes the target, and the shipped behavior is
-> the old three-state one.
+> **Implemented.** The loud-failure branch lives in `hq/anchor.py`'s `gate_state()`,
+> wired into every hook via `_harness_common.gate_corrupt_reason()`. Unit fixtures for
+> all four states are in `tests/test_hq.py`'s `GateStateTest`; the corrupt row's
+> end-to-end behavior through the real hooks is in `tests/test_hooks.py`'s
+> `TestCorruptGate`.
 
 **Legacy roots.** A project that still has `harness-tasks.json` and no
 `.orchestration/` keeps gating on the old `.harness-active` marker file, and hooks
