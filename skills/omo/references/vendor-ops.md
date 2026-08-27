@@ -101,9 +101,23 @@ The check belongs to the session, every time.
 `oracle` is Claude and `security` is GPT deliberately. When `oracle` has failed
 twice, the escape has somewhere to go.
 
-### What is actually installed here
+### What is installed is a per-machine fact -- measure it, do not read it
 
-Measured 2026-08-27 (`command -v`, a build of the wrapper, and one live call):
+The table below is one machine's measurement, kept as a worked example of what the
+check looks like. **It is not a claim about yours.** This skill ships to every
+machine the plugin is installed on, and a claude-only machine -- no codex account,
+no antigravity -- is a supported setup: four of the seven roles still work, and
+`SKILL.md`'s ladder does not require any of them.
+
+Run the check yourself before the first vendor call, and never install a missing
+CLI without asking (see `SKILL.md`, "Before the First Vendor Call"):
+
+```bash
+for c in codex claude agy; do printf '%-8s %s\n' "$c" "$(command -v $c || echo '-- absent')"; done
+```
+
+Measured 2026-08-27 on the machine this was written on (`command -v`, a build of the
+wrapper, and one live call):
 
 | CLI | On PATH | Reachable through the wrapper | Note |
 |:---|:---|:---|:---|

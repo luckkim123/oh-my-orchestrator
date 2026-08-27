@@ -110,6 +110,29 @@ governance -- what a vendor may be handed narrows: it gathers and rebuts, the la
 judges and writes the artifact. Boundary and per-project pruning:
 `references/lane-boundary.md`.
 
+## Before the First Vendor Call
+
+**A claude-only machine is a supported configuration, not a broken one.** The role
+table binds `security`, `develop`, and `explore` to codex by default, but nothing
+requires codex or antigravity to be installed -- omo's whole premise is that the
+session does the work and consulting nobody is a normal outcome. Someone who runs
+Claude and nothing else still gets every rung of the ladder; they just have four
+roles instead of seven.
+
+So before the first vendor call in a session:
+
+1. **Check the role's backend is on PATH** (`command -v codex`, `command -v claude`).
+   A missing CLI is not an error to work around silently -- the call will fail with
+   an exec error that reads like a bug in the wrapper.
+2. **If it is missing, say so and pick again.** Either route to a role whose backend
+   is present, or do the work yourself and name that you did.
+3. **Never install a vendor CLI on your own.** Installing codex or antigravity is a
+   per-machine decision with an account and a cost attached. Ask; if the answer is
+   no, that is a complete answer and the claude-backed roles carry the session.
+
+Measure, do not assume: a binary can be on PATH and unauthenticated, and a backend
+can resolve to a model the account cannot reach. One cheap call settles both.
+
 ## Vendor Invocation Format
 
 ```bash
