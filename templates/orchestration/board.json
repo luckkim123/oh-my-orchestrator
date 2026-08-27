@@ -15,7 +15,7 @@
       "_comment": "status uses campaign terms, not process terms. A worker is planned before it is dispatched, claimed once it takes the work, reported once its post lands, closed when the manager accepts it. 'running' would be a process fact this file cannot know.",
       "role": "lit-critic",
       "vendor": "codex",
-      "model": "gpt-5.2",
+      "model": "gpt-5.6-terra",
       "writes_repo": false,
       "worktree": null,
       "status": "planned",

@@ -5,7 +5,7 @@
 # to the Codex *session*, so the shared rules load on every task. Passing them in the
 # prompt instead makes them a per-call payload that a truncated prompt drops.
 
-model = "gpt-5.2-codex"
+model = "gpt-5.6-terra"
 model_reasoning_effort = "high"
 model_reasoning_summary = "detailed"
 

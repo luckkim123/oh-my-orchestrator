@@ -15,13 +15,13 @@
         },
         "security": {
           "backend": "codex",
-          "model": "gpt-5.2",
+          "model": "gpt-5.6-terra",
           "reasoning": "xhigh",
           "yolo": false
         },
         "develop": {
           "backend": "codex",
-          "model": "gpt-5.2",
+          "model": "gpt-5.6-terra",
           "reasoning": "xhigh",
           "yolo": true
         },
@@ -33,7 +33,7 @@
         },
         "explore": {
           "backend": "codex",
-          "model": "gpt-5.2",
+          "model": "gpt-5.6-terra",
           "reasoning": "low",
           "yolo": false
         },
@@ -98,6 +98,30 @@
           "source": "skills/omo/references/security.md",
           "target": "skills/omo/references/security.md",
           "description": "Install develop agent prompt"
+        },
+        {
+          "type": "copy_file",
+          "source": "skills/omo/references/vendor-ops.md",
+          "target": "skills/omo/references/vendor-ops.md",
+          "description": "Install vendor operations reference"
+        },
+        {
+          "type": "copy_file",
+          "source": "skills/omo/references/shared-context.md",
+          "target": "skills/omo/references/shared-context.md",
+          "description": "Install shared-context reference"
+        },
+        {
+          "type": "copy_file",
+          "source": "skills/omo/references/decision-record.md",
+          "target": "skills/omo/references/decision-record.md",
+          "description": "Install decision-record reference"
+        },
+        {
+          "type": "copy_file",
+          "source": "skills/omo/references/lane-boundary.md",
+          "target": "skills/omo/references/lane-boundary.md",
+          "description": "Install lane-boundary reference"
         }
       ]
     },
