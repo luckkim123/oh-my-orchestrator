@@ -80,6 +80,20 @@ func TestBackendBuildArgs_Model(t *testing.T) {
 		}
 	})
 
+	t.Run("claude includes --effort when reasoning set", func(t *testing.T) {
+		// The tier came from models.json and reached argv nowhere before
+		// 2026-08-27; codex got `-c model_reasoning_effort=` and claude got
+		// nothing, so four of the seven configured roles ran at the CLI default.
+		t.Setenv("CODEAGENT_SKIP_PERMISSIONS", "false")
+		backend := ClaudeBackend{}
+		cfg := &config.Config{Mode: "new", Model: "opus", ReasoningEffort: "high"}
+		got := backend.BuildArgs(cfg, "todo")
+		want := []string{"-p", "--setting-sources", "", "--model", "opus", "--effort", "high", "--output-format", "stream-json", "--verbose", "todo"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+
 	t.Run("gemini includes -m when set", func(t *testing.T) {
 		backend := GeminiBackend{}
 		cfg := &config.Config{Mode: "new", Model: "gemini-3-pro-preview"}

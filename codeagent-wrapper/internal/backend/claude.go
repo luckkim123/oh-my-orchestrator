@@ -117,16 +117,29 @@ func buildClaudeArgs(cfg *config.Config, targetArg string) []string {
 	}
 	args := []string{"-p"}
 	// Default to skip permissions unless CODEAGENT_SKIP_PERMISSIONS=false
-	if cfg.SkipPermissions || cfg.Yolo || config.EnvFlagDefaultTrue("CODEAGENT_SKIP_PERMISSIONS") {
+	if cfg.SkipPermissions || config.YoloEnabled(cfg.Yolo, cfg.YoloSet, "CODEAGENT_SKIP_PERMISSIONS") {
 		args = append(args, "--dangerously-skip-permissions")
 	}
 
 	// Prevent infinite recursion: disable all setting sources (user, project, local)
-	// This ensures a clean execution environment without CLAUDE.md or skills that would trigger codeagent
-	// args = append(args, "--setting-sources", "")
+	// so the invoked Claude does not load ~/.claude/CLAUDE.md or skills and call
+	// codeagent again. Added deliberately in a09c103 for that reason; f2e75c1
+	// commented it out in May 2026 with an empty commit body and left the six
+	// expectations in backend_test.go / main_test.go asserting it, so the Go suite
+	// was red until 2026-08-27. Restored: the stated hazard still applies and the
+	// CLI still accepts the flag.
+	args = append(args, "--setting-sources", "")
 
 	if model := strings.TrimSpace(cfg.Model); model != "" {
 		args = append(args, "--model", model)
+	}
+
+	// Claude CLI spells the effort tier `--effort` and accepts exactly the tiers
+	// the role config uses (low, medium, high, xhigh, max). Until 2026-08-27 this
+	// was not emitted at all, so every claude-backed role silently ran at the
+	// CLI's default no matter what `reasoning` said in models.json.
+	if effort := strings.TrimSpace(cfg.ReasoningEffort); effort != "" {
+		args = append(args, "--effort", effort)
 	}
 
 	if cfg.Mode == "resume" {

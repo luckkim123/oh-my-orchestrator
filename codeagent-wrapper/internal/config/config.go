@@ -23,6 +23,11 @@ type Config struct {
 	PromptFileExplicit bool
 	SkipPermissions    bool
 	Yolo               bool
+	// YoloSet records that the role config named `yolo` explicitly. Without it,
+	// an explicit false is indistinguishable from absent and loses to the env
+	// default, which is how a security role configured NOT to bypass the sandbox
+	// bypassed it anyway until 2026-08-27.
+	YoloSet            bool
 	MaxParallelWorkers int
 	AllowedTools       []string
 	DisallowedTools    []string
@@ -60,6 +65,16 @@ func ParseBoolFlag(val string, defaultValue bool) bool {
 
 // EnvFlagDefaultTrue returns true unless the env var is explicitly set to
 // false/0/no/off.
+// YoloEnabled resolves the bypass decision. An explicit `yolo` on the role wins
+// outright; only an unset one falls through to the env default. These used to be
+// OR-ed, so `"yolo": false` could never suppress a default-true env flag.
+func YoloEnabled(yolo, yoloSet bool, envKey string) bool {
+	if yoloSet {
+		return yolo
+	}
+	return EnvFlagDefaultTrue(envKey)
+}
+
 func EnvFlagDefaultTrue(key string) bool {
 	val, ok := os.LookupEnv(key)
 	if !ok {

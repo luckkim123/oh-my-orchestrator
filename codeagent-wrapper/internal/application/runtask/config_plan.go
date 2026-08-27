@@ -13,6 +13,8 @@ func PrepareConfigPlan(cfg *config.Config, deps PrepareDeps) (Plan, error) {
 		ReasoningEffort:    cfg.ReasoningEffort,
 		Agent:              cfg.Agent,
 		SkipPermissions:    cfg.SkipPermissions,
+		Yolo:               cfg.Yolo,
+		YoloSet:            cfg.YoloSet,
 		Worktree:           cfg.Worktree,
 		AllowedTools:       cfg.AllowedTools,
 		DisallowedTools:    cfg.DisallowedTools,

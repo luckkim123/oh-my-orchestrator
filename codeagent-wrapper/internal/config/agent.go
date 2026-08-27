@@ -20,7 +20,7 @@ type AgentModelConfig struct {
 	Model           string   `json:"model"`
 	PromptFile      string   `json:"prompt_file,omitempty"`
 	Description     string   `json:"description,omitempty"`
-	Yolo            bool     `json:"yolo,omitempty"`
+	Yolo            *bool    `json:"yolo,omitempty"`
 	Reasoning       string   `json:"reasoning,omitempty"`
 	BaseURL         string   `json:"base_url,omitempty"`
 	APIKey          string   `json:"api_key,omitempty"`
@@ -178,17 +178,17 @@ func resolveBackendConfig(cfg *ModelsConfig, backendName string) BackendConfig {
 	return BackendConfig{}
 }
 
-func resolveAgentConfig(agentName string) (backend, model, promptFile, reasoning, baseURL, apiKey string, yolo bool, allowedTools, disallowedTools []string, err error) {
+func resolveAgentConfig(agentName string) (backend, model, promptFile, reasoning, baseURL, apiKey string, yolo *bool, allowedTools, disallowedTools []string, err error) {
 	if err := ValidateAgentName(agentName); err != nil {
-		return "", "", "", "", "", "", false, nil, nil, err
+		return "", "", "", "", "", "", nil, nil, nil, err
 	}
 
 	cfg, err := modelsConfig()
 	if err != nil {
-		return "", "", "", "", "", "", false, nil, nil, err
+		return "", "", "", "", "", "", nil, nil, nil, err
 	}
 	if cfg == nil {
-		return "", "", "", "", "", "", false, nil, nil, fmt.Errorf("models config is nil\n\n%s", modelsConfigHint(""))
+		return "", "", "", "", "", "", nil, nil, nil, fmt.Errorf("models config is nil\n\n%s", modelsConfigHint(""))
 	}
 
 	if agent, ok := cfg.Agents[agentName]; ok {
@@ -198,9 +198,9 @@ func resolveAgentConfig(agentName string) (backend, model, promptFile, reasoning
 			if backend == "" {
 				configPath, pathErr := modelsConfigPath()
 				if pathErr != nil {
-					return "", "", "", "", "", "", false, nil, nil, fmt.Errorf("agent %q has empty backend and default_backend is not set\n\n%s", agentName, modelsConfigHint(""))
+					return "", "", "", "", "", "", nil, nil, nil, fmt.Errorf("agent %q has empty backend and default_backend is not set\n\n%s", agentName, modelsConfigHint(""))
 				}
-				return "", "", "", "", "", "", false, nil, nil, fmt.Errorf("agent %q has empty backend and default_backend is not set\n\n%s", agentName, modelsConfigHint(configPath))
+				return "", "", "", "", "", "", nil, nil, nil, fmt.Errorf("agent %q has empty backend and default_backend is not set\n\n%s", agentName, modelsConfigHint(configPath))
 			}
 		}
 		backendCfg := resolveBackendConfig(cfg, backend)
@@ -218,9 +218,9 @@ func resolveAgentConfig(agentName string) (backend, model, promptFile, reasoning
 		if model == "" {
 			configPath, pathErr := modelsConfigPath()
 			if pathErr != nil {
-				return "", "", "", "", "", "", false, nil, nil, fmt.Errorf("agent %q has empty model; set agents.%s.model in %s\n\n%s", agentName, agentName, modelsConfigTildePath, modelsConfigHint(""))
+				return "", "", "", "", "", "", nil, nil, nil, fmt.Errorf("agent %q has empty model; set agents.%s.model in %s\n\n%s", agentName, agentName, modelsConfigTildePath, modelsConfigHint(""))
 			}
-			return "", "", "", "", "", "", false, nil, nil, fmt.Errorf("agent %q has empty model; set agents.%s.model in %s\n\n%s", agentName, agentName, modelsConfigTildePath, modelsConfigHint(configPath))
+			return "", "", "", "", "", "", nil, nil, nil, fmt.Errorf("agent %q has empty model; set agents.%s.model in %s\n\n%s", agentName, agentName, modelsConfigTildePath, modelsConfigHint(configPath))
 		}
 		return backend, model, agent.PromptFile, agent.Reasoning, baseURL, apiKey, agent.Yolo, agent.AllowedTools, agent.DisallowedTools, nil
 	}
@@ -231,24 +231,27 @@ func resolveAgentConfig(agentName string) (backend, model, promptFile, reasoning
 		configPath, pathErr := modelsConfigPath()
 		if backend == "" || model == "" {
 			if pathErr != nil {
-				return "", "", "", "", "", "", false, nil, nil, fmt.Errorf("dynamic agent %q requires default_backend and default_model to be set in %s\n\n%s", agentName, modelsConfigTildePath, modelsConfigHint(""))
+				return "", "", "", "", "", "", nil, nil, nil, fmt.Errorf("dynamic agent %q requires default_backend and default_model to be set in %s\n\n%s", agentName, modelsConfigTildePath, modelsConfigHint(""))
 			}
-			return "", "", "", "", "", "", false, nil, nil, fmt.Errorf("dynamic agent %q requires default_backend and default_model to be set in %s\n\n%s", agentName, modelsConfigTildePath, modelsConfigHint(configPath))
+			return "", "", "", "", "", "", nil, nil, nil, fmt.Errorf("dynamic agent %q requires default_backend and default_model to be set in %s\n\n%s", agentName, modelsConfigTildePath, modelsConfigHint(configPath))
 		}
 		backendCfg := resolveBackendConfig(cfg, backend)
 		baseURL = strings.TrimSpace(backendCfg.BaseURL)
 		apiKey = strings.TrimSpace(backendCfg.APIKey)
-		return backend, model, dynamic.PromptFile, "", baseURL, apiKey, false, nil, nil, nil
+		// nil, not false: a dynamic agent is a bare prompt file with no yolo
+		// declaration, so it must fall through to the env default rather than
+		// asserting "do not bypass".
+		return backend, model, dynamic.PromptFile, "", baseURL, apiKey, nil, nil, nil, nil
 	}
 
 	configPath, pathErr := modelsConfigPath()
 	if pathErr != nil {
-		return "", "", "", "", "", "", false, nil, nil, fmt.Errorf("agent %q not found in %s\n\n%s", agentName, modelsConfigTildePath, modelsConfigHint(""))
+		return "", "", "", "", "", "", nil, nil, nil, fmt.Errorf("agent %q not found in %s\n\n%s", agentName, modelsConfigTildePath, modelsConfigHint(""))
 	}
-	return "", "", "", "", "", "", false, nil, nil, fmt.Errorf("agent %q not found in %s\n\n%s", agentName, modelsConfigTildePath, modelsConfigHint(configPath))
+	return "", "", "", "", "", "", nil, nil, nil, fmt.Errorf("agent %q not found in %s\n\n%s", agentName, modelsConfigTildePath, modelsConfigHint(configPath))
 }
 
-func ResolveAgentConfig(agentName string) (backend, model, promptFile, reasoning, baseURL, apiKey string, yolo bool, allowedTools, disallowedTools []string, err error) {
+func ResolveAgentConfig(agentName string) (backend, model, promptFile, reasoning, baseURL, apiKey string, yolo *bool, allowedTools, disallowedTools []string, err error) {
 	return resolveAgentConfig(agentName)
 }
 

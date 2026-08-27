@@ -39,6 +39,7 @@ func BuildSingleConfig(cmd *cobra.Command, args []string, rawArgv []string, opts
 	promptFileExplicit := false
 	outputPath := ""
 	yolo := false
+	yoloSet := false
 
 	if cmd.Flags().Changed("agent") {
 		agentName = strings.TrimSpace(opts.Agent)
@@ -60,13 +61,16 @@ func BuildSingleConfig(cmd *cobra.Command, args []string, rawArgv []string, opts
 	var resolvedBackend, resolvedModel, resolvedPromptFile, resolvedReasoning string
 	var resolvedAllowedTools, resolvedDisallowedTools []string
 	if agentName != "" {
-		var resolvedYolo bool
+		var resolvedYolo *bool
 		var err error
 		resolvedBackend, resolvedModel, resolvedPromptFile, resolvedReasoning, _, _, resolvedYolo, resolvedAllowedTools, resolvedDisallowedTools, err = config.ResolveAgentConfig(agentName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve agent %q: %w", agentName, err)
 		}
-		yolo = resolvedYolo
+		if resolvedYolo != nil {
+			yolo = *resolvedYolo
+			yoloSet = true
+		}
 	}
 
 	if cmd.Flags().Changed("prompt-file") {
@@ -170,6 +174,7 @@ func BuildSingleConfig(cmd *cobra.Command, args []string, rawArgv []string, opts
 		OutputPath:         outputPath,
 		SkipPermissions:    skipPermissions,
 		Yolo:               yolo,
+		YoloSet:            yoloSet,
 		Model:              model,
 		ReasoningEffort:    reasoningEffort,
 		MaxParallelWorkers: config.ResolveMaxParallelWorkers(),

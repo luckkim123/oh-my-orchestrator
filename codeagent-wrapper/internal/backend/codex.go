@@ -47,7 +47,7 @@ func BuildCodexArgs(cfg *config.Config, targetArg string) []string {
 	args := []string{"e"}
 
 	// Default to bypass sandbox unless CODEX_BYPASS_SANDBOX=false
-	if cfg.Yolo || config.EnvFlagDefaultTrue("CODEX_BYPASS_SANDBOX") {
+	if config.YoloEnabled(cfg.Yolo, cfg.YoloSet, "CODEX_BYPASS_SANDBOX") {
 		logWarnFn("YOLO mode or CODEX_BYPASS_SANDBOX enabled: running without approval/sandbox protection")
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}

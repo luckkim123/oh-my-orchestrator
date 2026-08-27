@@ -17,6 +17,8 @@ type Spec struct {
 	Agent           string
 	PromptFile      string
 	SkipPermissions bool
+	Yolo            bool
+	YoloSet         bool
 	Worktree        bool
 	AllowedTools    []string
 	DisallowedTools []string

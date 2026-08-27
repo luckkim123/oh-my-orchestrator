@@ -89,12 +89,28 @@ func applySingleTaskPromptAndSkills(cmd runtask.Command, taskText string) (strin
 	return taskText, nil
 }
 
+// buildSingleTaskCommandArgs renders the argv shown in the startup banner. Until
+// 2026-08-27 it carried only four fields, so the banner printed an empty `-C` and
+// dropped the --dangerously-* flags, and anyone debugging from that line was
+// reading a command the wrapper never issued.
+//
+// It is a close approximation, not a guarantee: the banner is rendered before the
+// executor resolves worktree mode (which rewrites WorkDir) and before the claude
+// backend fills an omitted model from ~/.claude/settings.json. Those two can still
+// differ from the executed argv; everything else here mirrors it.
 func buildSingleTaskCommandArgs(cmd runtask.Command, targetArg string) []string {
 	cfg := &config.Config{
+		Mode:            cmd.Mode,
+		SessionID:       cmd.SessionID,
+		WorkDir:         cmd.WorkDir,
 		Backend:         cmd.Backend,
 		Model:           cmd.Model,
 		ReasoningEffort: cmd.ReasoningEffort,
 		SkipPermissions: cmd.SkipPermissions,
+		Yolo:            cmd.Yolo,
+		YoloSet:         cmd.YoloSet,
+		AllowedTools:    cmd.AllowedTools,
+		DisallowedTools: cmd.DisallowedTools,
 	}
 	return buildCodexArgsFn(cfg, targetArg)
 }

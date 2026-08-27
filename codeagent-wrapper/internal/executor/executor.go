@@ -834,56 +834,25 @@ func GenerateFinalOutputWithMode(results []TaskResult, summaryOnly bool) string 
 	return sb.String()
 }
 
+// buildCodexArgs is the fallback used when RunCodexTaskWithContext is given
+// neither a Backend nor a defaultArgsBuilder. It delegates rather than keeping a
+// second copy: until 2026-08-27 this was a byte-identical duplicate of
+// backend.BuildCodexArgs, which is exactly the shape that drifts when only one
+// side gets a new flag.
 func buildCodexArgs(cfg *Config, targetArg string) []string {
 	if cfg == nil {
 		panic("buildCodexArgs: nil config")
 	}
-
-	var resumeSessionID string
-	isResume := cfg.Mode == "resume"
-	if isResume {
-		resumeSessionID = strings.TrimSpace(cfg.SessionID)
-		if resumeSessionID == "" {
-			logError("invalid config: resume mode requires non-empty session_id")
-			isResume = false
-		}
-	}
-
-	args := []string{"e"}
-
-	// Default to bypass sandbox unless CODEX_BYPASS_SANDBOX=false
-	if cfg.Yolo || config.EnvFlagDefaultTrue("CODEX_BYPASS_SANDBOX") {
-		logWarn("YOLO mode or CODEX_BYPASS_SANDBOX enabled: running without approval/sandbox protection")
-		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
-	}
-
-	if model := strings.TrimSpace(cfg.Model); model != "" {
-		args = append(args, "--model", model)
-	}
-
-	if reasoningEffort := strings.TrimSpace(cfg.ReasoningEffort); reasoningEffort != "" {
-		args = append(args, "-c", "model_reasoning_effort="+reasoningEffort)
-	}
-
-	args = append(args, "--skip-git-repo-check")
-
-	if isResume {
-		return append(args,
-			"--json",
-			"resume",
-			resumeSessionID,
-			targetArg,
-		)
-	}
-
-	return append(args,
-		"-C", cfg.WorkDir,
-		"--json",
-		targetArg,
-	)
+	return backend.BuildCodexArgs(cfg, targetArg)
 }
 
 func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backend Backend, defaultCommandName string, defaultArgsBuilder func(*Config, string) []string, customArgs []string, useCustomArgs bool, silent bool, timeoutSec int) TaskResult {
+	// timeoutSec is accepted and deliberately ignored: the wrapper waits for the
+	// vendor process to exit and lets the caller's shell own the wall clock, which
+	// is what `skills/omo/references/vendor-ops.md` documents (there is no
+	// `--timeout` flag). Pinned by TestRunCodexTaskWithContext_IgnoresWrapperTimeout-
+	// AndWaitsForExit. The parameter stays because ~40 call sites pass it and
+	// cancellation already travels through parentCtx.
 	_ = timeoutSec
 	taskCtx := taskSpec.Context
 	if parentCtx == nil {
@@ -908,6 +877,8 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		Model:           taskSpec.Model,
 		ReasoningEffort: taskSpec.ReasoningEffort,
 		SkipPermissions: taskSpec.SkipPermissions,
+		Yolo:            taskSpec.Yolo,
+		YoloSet:         taskSpec.YoloSet,
 		Backend:         defaultBackendName,
 		AllowedTools:    taskSpec.AllowedTools,
 		DisallowedTools: taskSpec.DisallowedTools,

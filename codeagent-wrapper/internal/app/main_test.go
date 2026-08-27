@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	runtask "codeagent-wrapper/internal/application/runtask"
 	config "codeagent-wrapper/internal/config"
 	domaintask "codeagent-wrapper/internal/domain/task"
 	executor "codeagent-wrapper/internal/executor"
@@ -2265,6 +2266,67 @@ func TestClaudeBackendBuildArgs_OutputValidation(t *testing.T) {
 			t.Fatalf("index %d got %q want %q (args=%v)", i, args[i], want[i], args)
 		}
 	}
+}
+
+func TestPrepareConfigPlan_CarriesYoloToTaskSpec(t *testing.T) {
+	// The regression is the FALSE case with the env unset. Yolo used to die between
+	// config.Config and runtask.Command, and even once carried it was OR-ed with
+	// EnvFlagDefaultTrue, which returns true when CODEX_BYPASS_SANDBOX is absent --
+	// so a security role configured NOT to bypass the sandbox bypassed it anyway.
+	// Testing Yolo:true would pass under either bug, since the default emits the
+	// flag on its own. Leave the env unset here on purpose: that is the shipped
+	// condition.
+	os.Unsetenv("CODEX_BYPASS_SANDBOX")
+
+	plan, err := runtask.PrepareConfigPlan(
+		&config.Config{Task: "audit", WorkDir: "/repo", Mode: "new", Backend: "codex",
+			Yolo: false, YoloSet: true},
+		runtask.PrepareDeps{
+			ResolveTaskText:      func(runtask.Command) (string, bool, error) { return "audit", false, nil },
+			ApplyPromptAndSkills: func(_ runtask.Command, task string) (string, error) { return task, nil },
+			ShouldUseStdin:       func(string, bool) bool { return false },
+			BuildCommandArgs:     buildSingleTaskCommandArgs,
+		})
+	if err != nil {
+		t.Fatalf("PrepareConfigPlan: %v", err)
+	}
+	if !plan.TaskSpec.YoloSet {
+		t.Fatalf("YoloSet did not survive Config -> Command -> Spec: %+v", plan.TaskSpec)
+	}
+	if containsArg(plan.Command, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("explicit yolo:false still bypassed the sandbox: %v", plan.Command)
+	}
+}
+
+func TestPrepareConfigPlan_UnsetYoloKeepsEnvDefault(t *testing.T) {
+	// The other half of the tri-state: a role that says nothing about yolo must
+	// still follow the env default, or this fix would silently disarm every
+	// existing caller that relies on it.
+	os.Unsetenv("CODEX_BYPASS_SANDBOX")
+
+	plan, err := runtask.PrepareConfigPlan(
+		&config.Config{Task: "build", WorkDir: "/repo", Mode: "new", Backend: "codex"},
+		runtask.PrepareDeps{
+			ResolveTaskText:      func(runtask.Command) (string, bool, error) { return "build", false, nil },
+			ApplyPromptAndSkills: func(_ runtask.Command, task string) (string, error) { return task, nil },
+			ShouldUseStdin:       func(string, bool) bool { return false },
+			BuildCommandArgs:     buildSingleTaskCommandArgs,
+		})
+	if err != nil {
+		t.Fatalf("PrepareConfigPlan: %v", err)
+	}
+	if !containsArg(plan.Command, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("unset yolo should keep the env default: %v", plan.Command)
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBackendBuildArgs_GeminiBackend(t *testing.T) {
