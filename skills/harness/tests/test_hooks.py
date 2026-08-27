@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,14 @@ IDLE_HOOK = HOOKS_DIR / "harness-teammateidle.py"
 SUBAGENT_HOOK = HOOKS_DIR / "harness-subagentstop.py"
 SUBAGENT_START_HOOK = HOOKS_DIR / "harness-subagentstart.py"
 PRECOMPACT_HOOK = HOOKS_DIR / "harness-precompact.py"
+
+# Read out of the hook rather than restated here: the boundary test pins the
+# comparison, not the number. Retuning the window is a deliberate edit and must
+# not be reported as a regression.
+_SKEW_MATCH = re.search(r"^SKEW_TOLERANCE_SECONDS = (\d+)$",
+                        PRECOMPACT_HOOK.read_text(encoding="utf-8"), re.M)
+assert _SKEW_MATCH, "SKEW_TOLERANCE_SECONDS is no longer a literal in the hook"
+SKEW_TOLERANCE_SECONDS = int(_SKEW_MATCH.group(1))
 
 
 def build_hook_env(env_extra: dict | None = None) -> dict[str, str]:
@@ -1311,6 +1320,33 @@ class TestPreCompactDrift(unittest.TestCase):
         self.hub.unlink()
         code, stdout, _ = run_hook(PRECOMPACT_HOOK, self._payload())
         self.assertEqual(stdout, "", "no prose half -> nothing to drift from")
+
+    def test_silent_at_exact_tolerance(self):
+        """skew == SKEW_TOLERANCE_SECONDS is inside the window; the guard is `<=`.
+
+        Exit code is asserted, not just stdout: a silent path that returned 2
+        would refuse the compaction while printing nothing, which every other
+        silent test here would also miss.
+        """
+        self._age_hub(SKEW_TOLERANCE_SECONDS)
+        code, stdout, _ = run_hook(PRECOMPACT_HOOK, self._payload())
+        self.assertEqual(code, 0, "silence must still exit 0 -- 2 blocks compaction")
+        self.assertEqual(stdout, "", "a skew exactly at the tolerance is not drift")
+
+    def test_warns_one_second_past_tolerance(self):
+        """The open side of the same boundary: T + 1 is the first skew that warns.
+
+        Paired with test_silent_at_exact_tolerance. Either test alone leaves the
+        window free to slide -- `skew <= T + 1` keeps T silent and still warns at
+        the 3600s used by test_warns_on_drift, so only the two together pin it.
+        """
+        self._age_hub(SKEW_TOLERANCE_SECONDS + 1)
+        code, stdout, stderr = run_hook(PRECOMPACT_HOOK, self._payload())
+        self.assertEqual(code, 0, "warning only -- exit 2 would refuse the compaction")
+        data = json.loads(stdout)
+        self.assertTrue(data["continue"], "compaction must proceed")
+        self.assertIn("HUB.md", data["systemMessage"])
+        self.assertEqual(stderr, "", "stderr on this event is a user-visible refusal")
 
 
 if __name__ == "__main__":

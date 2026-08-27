@@ -1,5 +1,5 @@
 {
-  "description": "Harness hooks: hold a premature stop, self-reflect on completion, inject task context on session start, inject the role card and observe board mismatches on subagent spawn, hold a subagent's exit until its campaign obligations are met",
+  "description": "Harness hooks: hold a premature stop, self-reflect on completion, inject task context on session start, inject the role card and observe board mismatches on subagent spawn, hold a subagent's exit until its campaign obligations are met. NOTE: this file serves the install.py path only -- find_module_hooks() reads it from the copy_dir target and substitutes ${CLAUDE_PLUGIN_ROOT} with the INSTALLED SKILL DIR (~/.claude/skills/harness), which is why the commands read ${CLAUDE_PLUGIN_ROOT}/hooks/. Under the plugin runtime that same variable means the PLUGIN ROOT, and .claude-plugin/plugin.json carries its own copy with skills/harness/hooks/ paths. Both prefixes are correct for their own loader; do not 'fix' one to match the other, and keep the two in sync when a hook is added.",
   "hooks": {
     "Stop": [
       {
