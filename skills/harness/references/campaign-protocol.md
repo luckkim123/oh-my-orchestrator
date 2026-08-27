@@ -35,22 +35,18 @@ the write rights is the two incidents this port added lines for.
 
 ## Layout
 
-Beside the project's other harness state, at the root of the project that owns the
-work — in a multi-project repo that is the project's folder, not the repo root.
+**Owned by `store-spec.md`.** Where the store sits, which directory gets the anchor,
+what each layer holds, and which files are tracked are all defined there — this file
+does not restate them, because two documents describing one layout is how the second one
+goes stale.
 
-```
-<project>/.orchestration/
-  HUB.md                             prose: goal, the request verbatim, decisions
-  board.json                         machine state: the gate, workers, tasks, cost
-  posts/<category>/<NNN-slug>.md     one file = one post; NNN monotonic across the WHOLE tree
-  sessions/<YYYY-MM-DD>-<worker>.md  episodic: did / artifact paths / not-verified
-  agents/<role>.md                   semantic: what the next holder of this role needs
-  rules/                             the payload vendor workers load every task
-  knowledge/{libraries,research}/    verified facts worth outliving the campaign
-```
+Read `references/store-spec.md` §2 (the anchor and its granularity, including the
+"the project's folder, not the repo root" rule), §3 (the four layers), and §5
+(`.gitignore` plus the `git check-ignore` verification) before laying out a campaign
+store.
 
-Verify nothing here is ignored: `git check-ignore -v .orchestration/` — any output
-means the board dies with the session, and the `.gitignore` is what to fix first.
+What stays here is the *campaign* shape on top of that store — depth, session-file
+naming, and post numbering.
 
 **No `campaigns/` layer by default.** The project folder already separates the work.
 Subdividing again buys nothing and costs id collisions: two campaigns each numbering
@@ -86,28 +82,21 @@ breaks every cross-reference citing the id.
 
 ## Post convention
 
-A 76KB single discussion file was measured as a no-op: nobody read it. So one file =
-one post, with a header that makes search work:
+**The schema is owned by `store-spec.md` §4.** It carries the full frontmatter — the
+fields below plus `harness:`, `subject:`, `supersedes:`, `topic:`, `confidence:`,
+`status:`, and `verified:` — along with how `subject:` supersede chains hold mutable
+truth and how cross-anchor citations are namespaced. Do not restate it here.
 
-```markdown
-# <title>
-- id: <category>/<NNN> · date: YYYY-MM-DD · author: <session or worker name>
-- to: <name, or all> · keywords: <3-6 search terms>
-- summary: <one line — others decide from this alone whether to open it>
+The two rules this file keeps, because both are campaign incidents rather than schema:
 
-<body: conclusion first, evidence as file:symbol>
+**One file is one post.** A 76KB single discussion file was measured as a no-op: nobody
+read it.
 
-## Comments
-- (YYYY-MM-DD, <name>) <content>          ← append-only
-```
-
-**Cite symbols, not line numbers.** Line numbers drift silently — 4 of 4 line-cited
-anchors had shifted on recheck.
-
-**An unsourced copy is forbidden.** Every copied fact carries its source
-(`file:symbol` or a commit sha) and its measurement date. The five handoff numbers
-three workers later refuted were exactly the unsourced ones; sourced claims
-re-verified cleanly.
+**An unsourced copy is forbidden.** Every copied fact carries its source (`file:symbol`
+or a commit sha) and its measurement date. The five handoff numbers three workers later
+refuted were exactly the unsourced ones; sourced claims re-verified cleanly. Related, and
+also measured: **cite symbols, not line numbers** — 4 of 4 line-cited anchors had drifted
+on recheck.
 
 ## Two memory layers — distill, do not dump
 
@@ -127,9 +116,18 @@ observations across a 514-file read-through.
 Facts go to their owning store **at write time**. "Distill later" measured at zero
 follow-through.
 
+**The owning-store table is retired.** It routed verified facts to a separate
+`knowledge/` store, and that store no longer exists — `store-spec.md` §4 absorbs it into
+posts, where the staleness discipline survives as the `verified:` field and a supersede
+chain instead of a banner convention. The post *is* the owning store now; there is no
+second place to send a fact to, so the only remaining question is which category it
+lands in (`campaign-protocol` §Post categories) and which `subject:` it advances
+(`store-spec.md` §4).
+
+Two rows of that table were never about `knowledge/` and still hold:
+
 | Content | Owning store | What the post keeps |
 |:---|:---|:---|
-| Verified library behavior, numbers, thresholds | `knowledge/` or the project's own index | sourced copy or pointer, plus a one-line summary |
 | Role lessons | `agents/<role>.md` | that file *is* the record |
 | Decisions | `HUB.md` decision table | native |
 

@@ -99,7 +99,11 @@ claude, where it cannot be -- say so: the consultation still works, but the work
 a stranger answering questions rather than a worker under this project's rules, and
 you weigh its answer accordingly.
 
-Setup, layout, write permissions, and per-project pruning: `references/shared-context.md`.
+Setup, write permissions, and per-project pruning: `references/shared-context.md`.
+**Where the store physically lives — the anchor, the four layers, and which of them git
+tracks — is owned by `../harness/references/store-spec.md`**, not by this skill. Read it
+before creating a store or deciding which layer a record belongs in; `shared-context.md`
+covers only the payload that sits inside it.
 
 When a design question gets settled -- by you or by a vendor -- record it without
 being asked: `references/decision-record.md`. A decision written nowhere gets

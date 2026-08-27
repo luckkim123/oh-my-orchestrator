@@ -44,7 +44,7 @@ Where the outputs live, so the next session does not go looking.
 | Session logs | `sessions/<YYYY-MM-DD>-<worker>.md` |
 | Role memory | `agents/<role>.md` (40-line cap, semantic, append-only) |
 | Shared rules | `rules/` |
-| Verified knowledge | `knowledge/{libraries,research}/` |
+| Verified knowledge | a post carrying `verified:` — there is no separate store |
 
 ## Reversals
 

@@ -35,8 +35,24 @@ so *presence* of the file cannot mean active. The gate has to be a status bit.
 
 - `/harness init` and `/harness run` set `status: "active"`.
 - When no eligible task remains, set `status: "closed"`. Do not delete the board.
-- Any other value, a missing board, or a board that will not parse: every hook exits
-  0 immediately. A broken board is not an active one.
+- Any other status value, or **a missing board**: every hook exits 0 immediately. No
+  board means no active campaign, which is a legitimate off state — the board is
+  machine-local runtime state, so a fresh clone correctly has none.
+- **A board that will not parse is not an off state — it is a loud failure (exit
+  non-zero).** A corrupt board read as an absent one is a hook that has silently stopped
+  while looking exactly like a hook that correctly decided it had no work. This reverses
+  half of the older rule here, which swallowed both cases.
+
+That is two of four states. The full gate is the pair (legacy `.om?` store,
+`.hq/.anchor`) and `references/store-spec.md` §6 owns the table. The state it adds that
+this section cannot express is "legacy store present, anchor absent" — migration not yet
+done — which must **warn and read via fallback** rather than fall quiet.
+
+> **Spec ahead of code.** The loud-failure branch is frozen in `store-spec.md`, not yet
+> implemented: `_harness_common.py:179-188` still returns a plain boolean and swallows a
+> parse error. Implementing it, with a fixture per row, is Phase 1 of the store
+> unification. Until then this section describes the target, and the shipped behavior is
+> the old three-state one.
 
 **Legacy roots.** A project that still has `harness-tasks.json` and no
 `.orchestration/` keeps gating on the old `.harness-active` marker file, and hooks
@@ -483,7 +499,6 @@ At session end, update `harness-tasks.json`: set `last_session` to current times
    - `board.json` — `status: "active"`, empty `tasks`/`workers`, `cost.actual_tokens: null`
    - `HUB.md` — the prose half: goal, the requester's words verbatim, decision table
    - `rules/` — the payload vendor workers load on every task
-   - `knowledge/libraries/_TEMPLATE.md` — the fixed section schema
 2. Create the empty working directories: `posts/`, `sessions/`, `agents/`
 3. Create `harness-progress.txt` with an initialization entry
 4. Install the vendor loaders for whichever CLIs this project uses, from
@@ -492,6 +507,17 @@ At session end, update `harness-tasks.json`: set `last_session` to current times
 6. Ask the user: add `.orchestration/board.json` and `harness-progress.txt` to
    `.gitignore`? The posts and `HUB.md` are usually worth committing — they are the
    record; the board and the log are runtime state.
+
+**No `knowledge/` directory.** It used to be seeded here as
+`knowledge/libraries/_TEMPLATE.md`. That store is retired: verified facts now land as
+posts, and its staleness discipline survives as the `verified:` field plus a supersede
+chain (`references/store-spec.md` §4). Seeding an empty second record store is what let
+one fact have two homes.
+
+**Step 6 is the pre-unification form of the layer split.** Under `store-spec.md` §3 the
+same question is answered structurally rather than asked — `community/` and `config/` are
+tracked, `work/` and `runtime/` are ignored, by two `**/.hq/` lines. Once this project
+migrates, drop the question rather than asking it about both layouts.
 
 ## Status Command (`/harness status`)
 

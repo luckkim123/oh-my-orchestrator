@@ -21,7 +21,7 @@ whole, 10,400 does not.
 
 | Piece | What it is |
 |:---|:---|
-| ① The store | `.orchestration/rules/`, `.orchestration/HUB.md`, `.orchestration/knowledge/{libraries,research}/`, with asymmetric write permission |
+| ① The store | `rules/`, `HUB.md`, and the post store, with asymmetric write permission. Layout is owned by `harness/references/store-spec.md` §3 |
 | ② The vendor-side loader | A `context-loader` skill attached to the *vendor's own session config*, so it loads every task |
 | ③ The payload | Five rule slots: coding principles, language, safety, evidence, domain |
 | ④ Per-project pruning | Drop the slots a project does not need; tailor `domain.md` |
@@ -38,23 +38,25 @@ executes, the vendors advise *from the same rules*.
 
 ## Layout
 
+**Owned by `harness/references/store-spec.md` §3.** What this file adds is the payload
+that lives inside it:
+
 ```
-.orchestration/
-  HUB.md                          human-readable prose: goal, the user's words
-                                  verbatim, the decision table, artifact map
   rules/
     coding-principles.md          ┐
     language.md                   │ the payload -- loaded on every vendor task
     safety.md                     │
     evidence.md                   │
     domain.md                     ┘ project-specific; delete if there is none
-  knowledge/
-    libraries/<name>.md           verified library behavior (fixed section order)
-    libraries/_TEMPLATE.md        the section schema
-    research/<topic>.md           external research results
 ```
 
 Seed it from `templates/orchestration/`.
+
+**There is no `knowledge/` directory.** It held `libraries/<name>.md` and
+`research/<topic>.md` and has been absorbed into the post store: a verified fact is a
+post carrying `harness:`, `verified:`, and a `subject:` whose supersede chain names the
+current answer. See `store-spec.md` §4 for the schema and §Knowledge goes stale below for
+the discipline, which survived the move intact.
 
 ## Write permission is asymmetric on purpose
 
@@ -62,8 +64,8 @@ Seed it from `templates/orchestration/`.
 |:---|:---|
 | `rules/` | The Claude session only |
 | `HUB.md` decision table | The session, and any vendor -- append a row, never rewrite one |
-| `knowledge/research/` | Whichever role was asked to research |
-| `knowledge/libraries/` | Whoever verified the behavior |
+| A post's body | Its author, on a git anchor; nobody, on a no-git anchor (supersede instead) |
+| A post's `## Comments` | Anyone -- append only, never rewrite |
 
 A vendor that can rewrite the rules it was given is not constrained by them.
 
@@ -124,30 +126,36 @@ A store with no re-check verb accumulates confident wrong answers. The symptom i
 visible in the sibling harnesses: an observation sat at `stuck_candidate` for 75 days
 because nothing ever asked whether it still held.
 
-The fix here is a rule, not a tool. Every `knowledge/libraries/<name>.md` opens with
+The fix here is a rule, not a tool. Every post carrying a verified fact fills the
+frontmatter field
 
 ```
-> Last verified: YYYY-MM-DD against version x.y.z
+- verified: YYYY-MM-DD (against <version|commit>)
 ```
 
-**Before relying on one of these files, compare that version to what is installed.**
+which is the same discipline the old `> Last verified:` banner carried, moved into a
+field a linter can read.
+
+**Before relying on one of these posts, compare that version to what is installed.**
 If they differ, the file is suspect: use it as a lead, verify the specific claim you
 need, and update the banner in the same pass. If they match, the file stands.
 
 Three rules keep this from rotting:
 
-1. **A stale entry gets bannered, never deleted.** `> (stale as of YYYY-MM-DD: <what
-   changed>)` at the top. Deletion loses the record that someone checked; the next
-   reader re-derives it from scratch.
-2. **Re-verification is part of the task that needed the file,** not a separate
+1. **A stale entry is superseded, never deleted.** Write the new post with
+   `supersedes:` naming the old one; the old post stays on disk and stays reachable.
+   Deletion loses the record that someone checked, and the next reader re-derives it
+   from scratch. (Pre-migration stores did this with a `> (stale as of YYYY-MM-DD:
+   <what changed>)` banner — the supersede chain is that banner, made queryable.)
+2. **Re-verification is part of the task that needed the post,** not a separate
    cleanup someone will do later. "Distill later" measured at zero follow-through,
    and so does "re-check later".
-3. **A version bump alone is not verification.** Bumping the banner without
+3. **A version bump alone is not verification.** Advancing `verified:` without
    re-running the check that produced the claim converts an old fact into a fresh
    lie.
 
-Research notes under `knowledge/research/` carry the same banner and the same rule.
-Their staleness clock is the source's publication date, not a package version.
+Posts carrying external research (`topic: reference`) follow the same rule. Their
+staleness clock is the source's publication date, not a package version.
 
 ## Vendor worker permissions
 
