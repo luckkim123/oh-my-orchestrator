@@ -16,13 +16,25 @@ hand-roll the CLI call:
 | Concern | Handled where | You pass |
 |:---|:---|:---|
 | `--skip-git-repo-check` on codex | `backend/codex.go` -- always appended | nothing |
-| `model_reasoning_effort` | `backend/codex.go` -- emitted as `-c model_reasoning_effort=<v>` | `--reasoning-effort <tier>` |
+| Effort tier on codex | `backend/codex.go` -- emitted as `-c model_reasoning_effort=<v>` | `--reasoning-effort <tier>` |
+| Effort tier on claude | `backend/claude.go` -- emitted as `--effort <v>` | `--reasoning-effort <tier>` |
 | Backend + model selection | `config.json` `modules.omo.agents.<role>` | `--agent <role>`, or override with `--backend` / `--model` |
 | Prompt delivery | stdin (`-`) or `--prompt-file` | the Context Pack heredoc |
 
-Flags the wrapper accepts: `--agent`, `--backend`, `--model`, `--reasoning-effort`,
-`--prompt-file`, `--output`. **There is no `--timeout`** -- the timeout is the one
-you give the shell tool that runs the wrapper.
+Flags the wrapper accepts, verified against `--help` on a build of this repo
+(2026-08-27): `--agent`, `--backend`, `--model`, `--reasoning-effort`,
+`--prompt-file`, `--output`, `--skills`, `--worktree`, `--parallel`,
+`--skip-permissions` (alias `--dangerously-skip-permissions`), `--config`,
+`--cleanup`, `--full-output`, `--version`.
+**There is no `--timeout`** -- the timeout is the one you give the shell tool that
+runs the wrapper. That is by design, not an omission: `RunCodexTaskWithContext`
+takes a `timeoutSec` and discards it, waiting for the vendor process to exit, and
+`TestRunCodexTaskWithContext_IgnoresWrapperTimeoutAndWaitsForExit` pins it.
+
+The two effort rows are worth reading twice. Until 2026-08-27 the claude row did
+not exist -- `buildClaudeArgs` never read `ReasoningEffort` -- so the `reasoning`
+value on every claude-backed role was accepted, displayed, and dropped. If you are
+reading an older transcript, its claude calls all ran at the CLI default.
 
 ## Reasoning effort: pick the tier, then the timeout
 
@@ -58,30 +70,44 @@ CLIs that are not installed:
 | Role | Backend | Model | Default effort |
 |:---|:---|:---|:---|
 | `oracle` | claude | claude-opus-5 | high |
-| `security` | codex | gpt-5.2 | xhigh |
-| `develop` | codex | gpt-5.2 | xhigh |
+| `security` | codex | gpt-5.6-terra | xhigh |
+| `develop` | codex | gpt-5.6-terra | xhigh |
 | `librarian` | claude | claude-sonnet-5 | medium |
-| `explore` | codex | gpt-5.2 | low |
+| `explore` | codex | gpt-5.6-terra | low |
 | `frontend-ui-ux-engineer` | claude | claude-sonnet-5 | medium |
 | `document-writer` | claude | claude-sonnet-5 | medium |
 
-**Diversity is counted in models, not backends.** A backend running a Claude model
-gives you the prior the session already has, so it cannot satisfy ground 1. That is
-not hypothetical: `agy models` lists `claude-sonnet-4-6` and `claude-opus-4-6-thinking`
-alongside its Gemini models, so "codex failed, try antigravity" can route straight
-back into the same family. Check what a backend resolves to before calling it a
-second opinion.
+**Diversity is counted in models, not backends** -- and it is counted against *your
+own* model, not just against the previous vendor. A backend running a Claude model
+gives you the prior the session already has. That is not hypothetical: `agy models`
+lists `claude-sonnet-4-6` and `claude-opus-4-6-thinking` alongside its Gemini models,
+so "codex failed, try antigravity" can route straight back into the same family.
+Check what a backend resolves to before calling it a second opinion.
+
+**This binds ground 3 as well as ground 1, and ground 3 is where it actually bites.**
+Ground 1 fails loudly -- you already know the approach is stuck. Ground 3 fails
+silently: `oracle` is `claude-opus-5`, so *an Opus 5 session that calls `--agent
+oracle` to review its own work has consulted itself* while believing the rule was
+satisfied. There is no error, just an approving answer from your own prior. Before
+any ground-3 call, compare the role's model against the model you are running; if
+they match, override with `--backend codex` and leave `--model` off so codex picks
+the account default. Measured 2026-08-27: that override caught a fabricated
+mechanism in the session's own docstring that a same-model reviewer had no reason
+to doubt.
+
+A config file cannot fix this, because it cannot know which model the session is.
+The check belongs to the session, every time.
 
 `oracle` is Claude and `security` is GPT deliberately. When `oracle` has failed
 twice, the escape has somewhere to go.
 
 ### What is actually installed here
 
-Measured 2026-08-26 (`command -v`, and one live call each):
+Measured 2026-08-27 (`command -v`, a build of the wrapper, and one live call):
 
 | CLI | On PATH | Reachable through the wrapper | Note |
 |:---|:---|:---|:---|
-| `codex` | yes | yes | |
+| `codex` | yes | yes | ChatGPT-account auth rejects `gpt-5.2` with HTTP 400; the account resolves to `gpt-5.6-terra` |
 | `claude` | yes | yes | |
 | `agy` (antigravity) | yes, authenticated | **no** | `agy --print` returned cleanly; the wrapper has no `agy` backend |
 | `gemini` | no | — | antigravity is its successor |
@@ -93,8 +119,10 @@ hardcoded method with no config override — so it cannot be pointed at `agy` fr
 `models.json`. Its flag surface is close to `claude`'s (`-p`/`--print`, `--model`,
 `--dangerously-skip-permissions`, `--output-format stream-json`) but not identical:
 no `--verbose`, and resume is `--conversation` rather than `-r`. Wiring it is a Go
-change plus a rebuild, and no Go toolchain was present on the machine where this was
-written — so it is recorded, not shipped.
+change plus a rebuild. A toolchain is present now (go1.27.0, added 2026-08-27) and
+`go build ./...` succeeds, so the blocker is the change itself, not the environment
+— it is still recorded rather than shipped because nothing has needed a third
+family yet.
 
 Until then, the multimodal and long-context work the lane table hands to a vendor
 goes to `claude`, not to Gemini.
@@ -158,6 +186,12 @@ Four constraints, all read out of `internal/executor/prompt.go`:
 3. **Names must match `^[a-zA-Z0-9_-]+$`.** A namespaced `plugin:skill` name is
    rejected outright.
 4. **YAML frontmatter is stripped** before the body is wrapped in `<skill>` tags.
+5. **On a claude backend it is the only path.** `buildClaudeArgs` passes
+   `--setting-sources ""`, so a claude worker loads no user- or project-scope skill
+   and no repo `CLAUDE.md` (measured 2026-08-27). The `context-loader` design in
+   `shared-context.md` therefore covers codex, gemini, and antigravity only; for
+   `oracle`, `librarian`, `frontend-ui-ux-engineer`, and `document-writer` the rules
+   have to ride in the prompt, inside the 16,000-character budget above.
 
 Measured against our own cards on 2026-08-26:
 

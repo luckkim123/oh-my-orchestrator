@@ -74,11 +74,25 @@ A vendor that can rewrite the rules it was given is not constrained by them.
 | codex | `.codex/config.toml` with a `[[skills.config]]` block per skill, plus `.codex/skills/{context-loader,decision-record}/` | `templates/vendor/codex/` |
 | gemini | `.gemini/settings.json` with `experimental.skills = true`, plus `.gemini/skills/{context-loader,decision-record}/` | `templates/vendor/gemini/` |
 | antigravity | `.agents/skills/`, and `~/.gemini/antigravity-cli/skills/` for the user-scope copy | `templates/vendor/antigravity/` |
-| claude | Nothing to install -- a claude-backend worker reads `.orchestration/` directly | -- |
+| claude | **The session-config loader does not work here.** `backend/claude.go` passes `--setting-sources ""` to break the recursion loop, which also disables every user- and project-scope skill and the repo `CLAUDE.md`. Pass the rules with `--skills` instead | -- |
 
 **The antigravity paths are unverified.** The CLI was not installed on the machine
 where this was written, and `agy plugin import claude` was never run. Treat that row
 as a plan, not a measurement, until someone confirms it.
+
+**The claude row is the exception that costs something.** Measured 2026-08-27 with
+`claude --setting-sources "" -p`: only built-in skills are listed, and the repo
+`CLAUDE.md` does not appear in the loaded instructions. So piece ② -- the whole
+reason a vendor is a worker rather than a stranger -- is unavailable on the one
+backend four of the seven roles use. What is left is `--skills`, which is prompt
+injection under a 16,000-character budget (`vendor-ops.md`), i.e. exactly the
+truncatable per-call payload this store exists to replace.
+
+Do not resolve this by dropping `--setting-sources ""`. It is the recursion guard:
+without it the invoked Claude loads the rules that call `codeagent-wrapper` and
+calls it again. The tension is real and unresolved -- when a claude-backed
+consultation needs the rules, pass them with `--skills` and treat the answer as
+coming from a worker that saw a truncatable copy.
 
 ## Two skills go to the vendor side
 

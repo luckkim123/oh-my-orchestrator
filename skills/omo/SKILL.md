@@ -34,6 +34,12 @@ round trip drops the context that made the edit correct.
    has to come from a model that did not author the thing being judged. You cannot
    be both author and approver of the same pass.
 
+   **Check the role's model against your own before you call it.** `oracle` is
+   `claude-opus-5`; an Opus 5 session that sends its own work to `--agent oracle`
+   has consulted itself and gets an approving answer with no error to warn it.
+   Same model as yours, ground 3 is not satisfied — override with `--backend codex`
+   and no `--model`. Details in `references/vendor-ops.md`.
+
 ### Not grounds for delegation
 
 - "It's a code change." You write code.
@@ -75,13 +81,23 @@ open tradeoffs are the real gate.
 ## Shared Context
 
 A vendor CLI does not inherit your session rules. It gets them from
-`.orchestration/`, loaded on the vendor's side by a `context-loader` skill attached
-to its own session config -- not from your prompt, which is truncatable.
+`.orchestration/`, and how depends on the backend:
+
+- **codex, gemini, antigravity** -- a `context-loader` skill attached to the vendor's
+  own session config, so it loads every task and is not competing with the task text
+  for prompt budget.
+- **claude** -- no loader is possible. `backend/claude.go` passes
+  `--setting-sources ""` to stop the invoked Claude from loading the rules that call
+  `codeagent-wrapper` and calling it again; that same flag disables every user- and
+  project-scope skill and the repo `CLAUDE.md`. Rules reach a claude worker only
+  through `--skills`, which is a truncatable per-call payload under a
+  16,000-character budget.
 
 Before the first vendor call in a project, check that `.orchestration/rules/` exists
-and that the vendor's loader is installed. If it is not, say so: the consultation
-still works, but the worker is a stranger answering questions rather than a worker
-under this project's rules, and you weigh its answer accordingly.
+and that the vendor's loader is installed. If it is not -- or if the backend is
+claude, where it cannot be -- say so: the consultation still works, but the worker is
+a stranger answering questions rather than a worker under this project's rules, and
+you weigh its answer accordingly.
 
 Setup, layout, write permissions, and per-project pruning: `references/shared-context.md`.
 
@@ -105,6 +121,7 @@ codeagent-wrapper --agent <agent_name> - <workdir> <<'EOF'
 - Explore output: <...>
 - Librarian output: <...>
 - Oracle output: <...>
+- Prior Attempts: <numbered, with what you observed -- "None" unless ground 1>
 - Known constraints: <tests to run, time budget, repo conventions>
 - Delegation ground: <1 three-strike | 2 context budget | 3 adversarial verification>
 
