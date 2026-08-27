@@ -10,9 +10,9 @@ import time
 from pathlib import Path
 
 from .anchor import HqError
+from .paths import HQ_LOCK_NAME, hq_community_dir, legacy_root
 from .post import Post, parse_post, serialize_post
 
-LOCK_NAME = ".hq-lock"
 INDEX_NAME = "INDEX.md"
 
 _FILENAME_NUM_RE = re.compile(r"^(\d{3})-")
@@ -22,8 +22,8 @@ def community_dir(anchor_root: Path) -> Path:
     """D-P1-1: resolve to .hq/community/ once it exists, else fall back to
     .orchestration/. Reads and writes both go to whichever this returns —
     today that is always .orchestration/ (P1 target)."""
-    new = anchor_root / ".hq" / "community"
-    return new if new.is_dir() else anchor_root / ".orchestration"
+    new = hq_community_dir(anchor_root)
+    return new if new.is_dir() else legacy_root(anchor_root)
 
 
 def posts_dir(anchor_root: Path) -> Path:
@@ -155,7 +155,7 @@ def with_store_lock(anchor_root: Path, fn, *, timeout_s: float = 5.0):
     """Run fn() while holding an exclusive fcntl lock on
     community_dir()/.hq-lock. Every write verb holds it; read verbs do not.
     The lock file is created if absent."""
-    lock_path = community_dir(anchor_root) / LOCK_NAME
+    lock_path = community_dir(anchor_root) / HQ_LOCK_NAME
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
     try:

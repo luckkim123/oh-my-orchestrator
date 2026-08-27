@@ -4,6 +4,13 @@ Consolidates duplicated logic: payload reading, state root discovery,
 JSON I/O, lock primitives, task eligibility, and ISO time helpers.
 
 Ported from Codex harness hooks to Claude Code.
+
+Also the hooks-side declaration point for the `.orchestration` root literal
+(LEGACY_ROOT below), a sibling to hq/paths.py rather than an import of it --
+see hq/paths.py's module docstring and test_paths_lint.py for why a hook does
+not reach across into the hq/ package for this. P2 (store-spec.md §9.5) is
+behavior-unchanged: every path helper below returns exactly what the inline
+code it replaced computed.
 """
 from __future__ import annotations
 
@@ -103,7 +110,8 @@ def maybe_log_hook_event(root: Path, payload: dict[str, Any], hook_script: str) 
 # State root discovery
 # ---------------------------------------------------------------------------
 
-BOARD_REL = ".orchestration/board.json"
+LEGACY_ROOT = ".orchestration"
+BOARD_REL = f"{LEGACY_ROOT}/board.json"
 LEGACY_STATE = "harness-tasks.json"
 
 # Board file names a root, in preference order. A project that has migrated
@@ -158,8 +166,24 @@ def find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
 # Board (.orchestration/board.json)
 # ---------------------------------------------------------------------------
 
+def legacy_root(root: Path) -> Path:
+    return root / LEGACY_ROOT
+
+
 def board_path(root: Path) -> Path:
-    return root / ".orchestration" / "board.json"
+    return legacy_root(root) / "board.json"
+
+
+def observations_jsonl(root: Path) -> Path:
+    return legacy_root(root) / "observations.jsonl"
+
+
+def agent_memory_md(root: Path, role: str) -> Path:
+    return legacy_root(root) / "agents" / f"{role}.md"
+
+
+def hub_md(root: Path) -> Path:
+    return legacy_root(root) / "HUB.md"
 
 
 def state_path(root: Path) -> Path:

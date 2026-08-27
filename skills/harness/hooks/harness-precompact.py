@@ -61,7 +61,7 @@ def main() -> int:
         return 0
 
     board = hc.board_path(root)
-    hub = root / ".orchestration" / "HUB.md"
+    hub = hc.hub_md(root)
     if not board.is_file() or not hub.is_file():
         return 0
 

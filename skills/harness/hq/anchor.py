@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-ANCHOR_REL = ".hq/.anchor"
+from .paths import ANCHOR_REL, has_legacy_store, legacy_board_json
 
 GATE_OFF = "off"
 GATE_LEGACY = "legacy"
@@ -90,10 +90,6 @@ def check_id_uniqueness(anchors: list) -> list:
     return reports
 
 
-def _has_legacy_store(root: Path) -> bool:
-    return (root / ".orchestration").is_dir() or (root / "harness-tasks.json").is_file()
-
-
 def find_anchor_root(start: Path) -> Path:
     """Ascend from start looking for a directory that is either a proper .hq
     anchor (a parseable .hq/.anchor) or a not-yet-migrated legacy store
@@ -108,7 +104,7 @@ def find_anchor_root(start: Path) -> Path:
     """
     cur = start.resolve()
     for d in [cur, *cur.parents]:
-        if (d / ANCHOR_REL).is_file() or _has_legacy_store(d):
+        if (d / ANCHOR_REL).is_file() or has_legacy_store(d):
             return d
     raise HqError(f"no .hq anchor or legacy store found ascending from {start}")
 
@@ -128,7 +124,7 @@ def gate_state(root: Path) -> tuple:
     try:
         anchor_file = root / ANCHOR_REL
         if not anchor_file.is_file():
-            if _has_legacy_store(root):
+            if has_legacy_store(root):
                 return (
                     GATE_LEGACY,
                     f"legacy store present at {root} (.orchestration/ or "
@@ -142,7 +138,7 @@ def gate_state(root: Path) -> tuple:
         if dup_reports:
             return (GATE_CORRUPT, "; ".join(dup_reports))
 
-        board_path = root / ".orchestration" / "board.json"
+        board_path = legacy_board_json(root)
         if board_path.is_file():
             try:
                 json.loads(board_path.read_text(encoding="utf-8"))

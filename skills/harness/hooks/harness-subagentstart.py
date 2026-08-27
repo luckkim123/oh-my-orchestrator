@@ -38,7 +38,7 @@ RESERVE_FOR_NOTICES = 1500  # notices survive truncation; role memory gives way
 
 
 def _observations_path(root: Path) -> Path:
-    return root / ".orchestration" / "observations.jsonl"
+    return hc.observations_jsonl(root)
 
 
 def _record(root: Path, entry: dict[str, Any]) -> None:
@@ -111,7 +111,7 @@ def build_context(root: Path, role: str, state: dict[str, Any], notices: list[st
             "your first message. SubagentStop will hold your exit over it."
         )
 
-    memory = root / ".orchestration" / "agents" / f"{role}.md"
+    memory = hc.agent_memory_md(root, role)
     if memory.is_file():
         try:
             body = memory.read_text(encoding="utf-8").strip()

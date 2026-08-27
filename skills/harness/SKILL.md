@@ -26,6 +26,39 @@ Executable protocol enabling any agent task to run continuously across multiple 
 /harness add "task description"  # Add a task to the list
 ```
 
+## The `hq` store CLI
+
+`hq` is the supported writer for the post store. **Use it instead of hand-writing post
+files** — a hand-written file drifts from the schema, and `hq lint` is the only thing
+that catches that before it reaches another machine.
+
+Every plugin's `bin/` is on `PATH`, so the command is bare `hq` (0.5.0+). It resolves
+its anchor by ascending from the working directory to the nearest one holding
+`.hq/.anchor` or a legacy `.orchestration/` store; `--anchor <path>` overrides. The
+global flags `--anchor`, `--json`, and `--version` come *before* the verb.
+
+| Verb | What it does |
+|:---|:---|
+| `hq post --category C --title T --author A --summary S --body-file F` | Create a post. The number is assigned tree-globally, so `finding/007` is followed by `decision/008`. Optional: `--subject` `--supersedes` `--topic` `--confidence` `--status` `--verified` `--keywords` `--to` `--harness` |
+| `hq comment <post-id> --author A --text T` | Append one comment. Never rewrites an existing line |
+| `hq edit <post-id> --author A --reason R --body-file F` | Replace a post body, recording who and why |
+| `hq query [--subject S] [--post-id ID] [--keyword K] [--harness H] [--topic T] [--status S]` | Read. `--subject` resolves the canonical post for that subject and names the ones it shadows |
+| `hq index` | Rewrite `INDEX.md` from the posts on disk |
+| `hq lint` | Schema check across the store. Run before committing |
+| `hq gc [--stale-days N]` | Report-only (default 180 days): posts whose `status: resolved` or `verified:` date has gone stale, and superseded chains. Removes nothing |
+
+`--body-file -` reads the body from stdin.
+
+The design SSOT is `references/store-spec.md` — the four layers, the post schema, and
+the anchor rules. This table is only the operating surface.
+
+> **The binding layer is still missing.** Nothing in a `PreToolUse` hook names `hq`, so
+> this section is advisory and a session under momentum can still hand-write a post.
+> Two tools in this project already died that exact way — `tokensave` (6 MCP calls
+> against 10,813 tool calls) and `graphify`'s MCP server (0 calls in 30 days), both
+> because the nudge layer named something else. Wiring a guard that names `hq` is
+> tracked as P6.
+
 ## Activation Gate
 
 Hooks take effect only when `.orchestration/board.json` reads `"status": "active"`.

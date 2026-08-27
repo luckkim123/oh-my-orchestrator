@@ -94,10 +94,10 @@ def _campaign_failures(root: Path, state: dict[str, Any], role: str) -> list[str
 
     failures: list[str] = []
 
-    memory = root / ".orchestration" / "agents" / f"{role}.md"
+    memory = hc.agent_memory_md(root, role)
     if not memory.is_file():
         failures.append(
-            f".orchestration/agents/{role}.md does not exist. Write what this role "
+            f"{memory.relative_to(root)} does not exist. Write what this role "
             "learned -- 40 lines maximum, semantic rather than chronological, "
             "append-only -- so the next spawn of this role does not start blind."
         )
