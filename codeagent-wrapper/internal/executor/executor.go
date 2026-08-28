@@ -957,6 +957,17 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 	}
 
 	useStdin := taskSpec.UseStdin
+	// agy has no stdin path: `--print` takes the prompt as a flag value and
+	// errors "flag needs an argument" without one, while `--print -` sends the
+	// literal "-" and gets a generic greeting back at exit 0 — a wrong answer
+	// that looks like a right one. So the prompt is materialised into argv for
+	// this backend. Measured against agy 1.1.22, 2026-08-28.
+	// ponytail: bounded by ARG_MAX (~1 MB on darwin); a Context Pack is
+	// kilobytes, but a prompt built from a whole file would need the
+	// --input-format stream-json path instead.
+	if cfg.Backend == "agy" {
+		useStdin = false
+	}
 	targetArg := taskSpec.Task
 	if useStdin {
 		targetArg = "-"

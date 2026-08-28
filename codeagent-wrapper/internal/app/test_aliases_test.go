@@ -12,6 +12,7 @@ type Config = config.Config
 type Backend = backend.Backend
 type CodexBackend = backend.CodexBackend
 type ClaudeBackend = backend.ClaudeBackend
+type AgyBackend = backend.AgyBackend
 type GeminiBackend = backend.GeminiBackend
 type OpencodeBackend = backend.OpencodeBackend
 type ParallelConfig = runtaskset.ParallelConfig

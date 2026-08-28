@@ -85,6 +85,7 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 	var (
 		codexMessage    string
 		claudeMessage   string
+		agyMessage      string
 		geminiBuffer    strings.Builder
 		opencodeMessage strings.Builder
 	)
@@ -137,6 +138,40 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 		}
 		isGemini := (event.Type == "init" && event.SessionID != "") || event.Role != "" || event.Delta != nil || event.Status != ""
 		isOpencode := event.OpencodeSessionID != "" && len(event.Part) > 0
+		// agy emits one result object, not a stream. It shares `status` with
+		// the gemini shape but spells the payload `response` and the session
+		// `conversation_id`, so it is detected on those and dispatched ahead
+		// of gemini below — otherwise the gemini branch swallows it and the
+		// call returns an empty message with a zero exit code.
+		isAgy := event.ConversationID != "" ||
+			((event.Status == "SUCCESS" || event.Status == "ERROR") &&
+				(event.Response != "" || event.Error != ""))
+
+		// Handle agy events before gemini (see isAgy above)
+		if isAgy {
+			if event.ConversationID != "" && threadID == "" {
+				threadID = event.ConversationID
+			}
+
+			infoFn(fmt.Sprintf("Parsed Agy event #%d status=%s response_len=%d error_len=%d", totalEvents, event.Status, len(event.Response), len(event.Error)))
+
+			switch {
+			case event.Response != "":
+				agyMessage = event.Response
+				notifyMessage()
+			case event.Error != "":
+				// Surface the failure as the message rather than dropping it:
+				// agy reports an unusable --model/--effort pair this way, and
+				// a silently empty result reads as "the vendor had nothing to
+				// say".
+				warnFn("agy reported an error: " + event.Error)
+				agyMessage = event.Error
+				notifyMessage()
+			}
+
+			notifyComplete()
+			continue
+		}
 
 		// Handle Opencode events first (most specific detection)
 		if isOpencode {
@@ -279,6 +314,8 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 	}
 
 	switch {
+	case agyMessage != "":
+		message = agyMessage
 	case opencodeMessage.Len() > 0:
 		message = opencodeMessage.String()
 	case geminiBuffer.Len() > 0:

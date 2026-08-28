@@ -2165,7 +2165,7 @@ func TestBackendSelectBackend(t *testing.T) {
 	}{
 		{"codex", "codex", CodexBackend{}},
 		{"claude mixed case", "ClAuDe", ClaudeBackend{}},
-		{"gemini", "gemini", GeminiBackend{}},
+		{"agy", "agy", AgyBackend{}},
 	}
 
 	for _, tt := range tests {
@@ -2183,9 +2183,9 @@ func TestBackendSelectBackend(t *testing.T) {
 				if _, ok := got.(ClaudeBackend); !ok {
 					t.Fatalf("expected ClaudeBackend, got %T", got)
 				}
-			case GeminiBackend:
-				if _, ok := got.(GeminiBackend); !ok {
-					t.Fatalf("expected GeminiBackend, got %T", got)
+			case AgyBackend:
+				if _, ok := got.(AgyBackend); !ok {
+					t.Fatalf("expected AgyBackend, got %T", got)
 				}
 			}
 		})

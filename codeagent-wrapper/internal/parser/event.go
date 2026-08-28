@@ -57,6 +57,14 @@ type UnifiedEvent struct {
 	// Opencode-specific fields (camelCase sessionID)
 	OpencodeSessionID string          `json:"sessionID,omitempty"`
 	Part              json.RawMessage `json:"part,omitempty"`
+
+	// Agy-specific fields. agy runs under `--output-format json`, which emits
+	// exactly one object rather than a stream, so these three carry the whole
+	// result. `Status` above is shared with the gemini shape, which is why the
+	// agy branch in parser.go has to be tested before the gemini one.
+	ConversationID string `json:"conversation_id,omitempty"`
+	Response       string `json:"response,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 // OpencodePart represents the part field in opencode events.

@@ -8,6 +8,11 @@ import (
 type Backend = legacy.Backend
 type CodexBackend = legacy.CodexBackend
 type ClaudeBackend = legacy.ClaudeBackend
+type AgyBackend = legacy.AgyBackend
+
+// GeminiBackend and OpencodeBackend are no longer in the registry (omo D24)
+// and cannot be selected; the aliases stay while the parser and the stderr
+// filter still name them.
 type GeminiBackend = legacy.GeminiBackend
 type OpencodeBackend = legacy.OpencodeBackend
 type MinimalClaudeSettings = legacy.MinimalClaudeSettings

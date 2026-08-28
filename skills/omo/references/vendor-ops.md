@@ -123,20 +123,43 @@ wrapper, and one live call):
 |:---|:---|:---|:---|
 | `codex` | yes | yes | ChatGPT-account auth rejects `gpt-5.2` with HTTP 400; the account resolves to `gpt-5.6-terra` |
 | `claude` | yes | yes | |
-| `agy` (antigravity) | yes, authenticated | **no** | `agy --print` returned cleanly; the wrapper has no `agy` backend |
-| `gemini` | no | — | antigravity is its successor |
-| `opencode` | no | — | the old `explore` assignment pointed here |
+| `agy` (antigravity) | yes, authenticated | **yes**, since 2026-08-29 | `AgyBackend`; see the three flag traps below |
+| `gemini` | no | **removed from the registry** (D24) | antigravity is its successor; the CLI no longer authenticates here |
+| `opencode` | no | **removed from the registry** (D24) | the old `explore` assignment pointed here |
 
-**`agy` is usable as a CLI and unreachable as a backend.** `internal/backend/registry.go`
-knows `codex`, `claude`, `gemini`, `opencode`, and each backend's `Command()` is a
-hardcoded method with no config override — so it cannot be pointed at `agy` from
-`models.json`. Its flag surface is close to `claude`'s (`-p`/`--print`, `--model`,
-`--dangerously-skip-permissions`, `--output-format stream-json`) but not identical:
-no `--verbose`, and resume is `--conversation` rather than `-r`. Wiring it is a Go
-change plus a rebuild. A toolchain is present now (go1.27.0, added 2026-08-27) and
-`go build ./...` succeeds, so the blocker is the change itself, not the environment
-— it is still recorded rather than shipped because nothing has needed a third
-family yet.
+**`agy` is now a backend.** `internal/backend/registry.go` holds exactly three —
+`codex`, `claude`, `agy` — after D24 removed `gemini` and `opencode`. Wiring it was
+not the one-line registry edit the decision assumed; three measured differences
+(agy 1.1.22, 2026-08-29) each needed their own workaround, and each fails *silently*
+if skipped:
+
+1. **agy never reads the prompt from stdin.** `--print` takes it as a flag value:
+   bare `--print` dies with `flag needs an argument: -print`, and `--print -` sends
+   the literal `-`, which the model answers with a generic greeting at exit 0. omo's
+   own invocation form (`codeagent-wrapper --agent X - <workdir> <<EOF`) is exactly
+   that path, so `executor.go` forces `useStdin = false` for this backend and
+   materialises the prompt into argv. Bounded by ARG_MAX (~1 MB on darwin).
+2. **`--effort` accepts only `low|medium|high`.** The role table's `xhigh` is a hard
+   error — `invalid --effort "xhigh" (valid: low, medium, high)` — so `agyEffort`
+   clamps `xhigh`/`max` to `high` and drops anything unrecognised.
+3. **Its stream-json shares no field with the other backends** (everything nests
+   under an `event` discriminator), so the parser drops it without erroring. The
+   backend therefore runs `--output-format json` and the parser carries an agy
+   branch keyed on `conversation_id`/`response`/`error`. That branch must be tested
+   **before** the gemini one, which fires on any non-empty `status`.
+
+Resume is `--conversation <id>`, not `-r`. Model names embed the effort tier
+(`gemini-3.1-pro-high`), and passing `--model` and `--effort` together is accepted.
+
+`GeminiBackend` and `OpencodeBackend` still compile — the parser, the stderr filter,
+and about 80 test lines name them — but `Select()` rejects both, so nothing can
+route there. Deleting that code is a separate sweep.
+
+⚠️ **The shipped binary may not have any of this.** `install.sh` downloads a
+prebuilt `codeagent-wrapper` from `stellarlinkco/myclaude` — the *upstream* repo —
+into `$HOME/.claude/bin`. That build has no `agy` backend and still carries
+`gemini`/`opencode`, and it overwrites a local build. Until this fork publishes its
+own binary, `agy` works only where someone ran `make install` from this tree.
 
 Until then, the multimodal and long-context work the lane table hands to a vendor
 goes to `claude`, not to Gemini.
@@ -168,8 +191,13 @@ back, not a verdict.
 
 ## Gemini and antigravity (`agy`)
 
-**Neither is currently reachable through the wrapper.** Kept here because the
-constraints bite the moment either is wired.
+**`agy` is reachable through the wrapper since 2026-08-29; `gemini` is not and will
+not be** — D24 replaced it rather than keeping both. The limits below are agy's now.
+
+> The two `agy` flag notes at the end of this section predate the backend and were
+> already correct. They were then re-derived from scratch during the wiring session
+> because nobody read this card first — the failure `feedback_resolved_knowledge_not_in_launch_path`
+> names. Read this section before touching an agy call path.
 
 **Free tier limits: 60 requests/minute, 1,000 requests/day.** A fan-out that ignores
 this fails partway through and returns a mix of results and rate-limit errors, which
