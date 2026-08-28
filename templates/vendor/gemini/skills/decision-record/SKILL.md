@@ -1,6 +1,6 @@
 ---
 name: decision-record
-description: Record design decisions into .orchestration/HUB.md without being asked. Activate when a choice is settled between real alternatives -- architecture, library selection, pattern, or a resolved tradeoff -- and when asked to record one or asked what was decided.
+description: Record design decisions into the community store's HUB.md (.hq/community/HUB.md, or the legacy .orchestration/HUB.md) without being asked. Activate when a choice is settled between real alternatives -- architecture, library selection, pattern, or a resolved tradeoff -- and when asked to record one or asked what was decided.
 ---
 
 # Decision Record
@@ -21,7 +21,8 @@ belong to the commit log. A decision table full of activity stops being read.
 
 ## How
 
-1. **Read the existing table in `.orchestration/HUB.md` first.** If your conclusion
+1. **Read the existing table in `.hq/community/HUB.md` first** — or `.orchestration/HUB.md`
+   if this project has not migrated yet. If your conclusion
    contradicts a row, say so and argue against that row by number. Recording a
    contradiction as if it were fresh leaves the project with two answers.
 2. Append one row. Never rewrite an existing one.
@@ -38,7 +39,7 @@ for the decision to change -- not a restatement of the decision.
 
 ## Not yours
 
-- `.orchestration/rules/` -- read-only to you.
+- the community store's `rules/` (`.hq/community/rules/`, or legacy `.orchestration/rules/`) -- read-only to you.
 - Any existing row -- append only. A decision that is overturned gets a new row
   naming the one it supersedes.
 - Deciding on the human's behalf. Record what was settled; do not settle what was

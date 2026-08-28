@@ -217,7 +217,7 @@ Measured against our own cards on 2026-08-26:
 The harness card not fitting is correct rather than a defect. It is written for the
 *session* running the campaign, which loads skills natively with no budget. A vendor
 worker does not need the campaign protocol; it needs its own obligations, and those
-arrive through the vendor-side `context-loader` reading `.orchestration/rules/`
+arrive through the vendor-side `context-loader` reading the store's `rules/`
 (5,175 characters for all five slots) plus the role card the SubagentStart hook
 injects. Do not pass `harness` through `--skills`.
 

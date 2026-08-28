@@ -80,8 +80,9 @@ open tradeoffs are the real gate.
 
 ## Shared Context
 
-A vendor CLI does not inherit your session rules. It gets them from
-`.orchestration/`, and how depends on the backend:
+A vendor CLI does not inherit your session rules. It gets them from the community
+store (`.hq/community/`, or the legacy `.orchestration/`), and how depends on the
+backend:
 
 - **codex, gemini, antigravity** -- a `context-loader` skill attached to the vendor's
   own session config, so it loads every task and is not competing with the task text
@@ -93,7 +94,7 @@ A vendor CLI does not inherit your session rules. It gets them from
   through `--skills`, which is a truncatable per-call payload under a
   16,000-character budget.
 
-Before the first vendor call in a project, check that `.orchestration/rules/` exists
+Before the first vendor call in a project, check that the store's `rules/` exists
 and that the vendor's loader is installed. If it is not -- or if the backend is
 claude, where it cannot be -- say so: the consultation still works, but the worker is
 a stranger answering questions rather than a worker under this project's rules, and

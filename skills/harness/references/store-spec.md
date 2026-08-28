@@ -509,8 +509,9 @@ read-path updates.
 | Path | Layer | Rule |
 |:---|:---|:---|
 | `learned.md` | `config/scholar/` | ③ |
-| `venues/*.yaml` | `config/scholar/` | ③ |
-| `workflows/*.js` | `config/scholar/` | ③ — executed by a verb |
+| `venues/*.yaml` | `config/scholar/venues/` | ③ |
+| `workflows/*.js` | `config/scholar/workflows/` | ③ — executed by a verb |
+| a Workflow `.js` at the store root (`section3_audit_workflow.js`) | `config/scholar/` | ③ — same class as the row above (`export const meta`, hand-authored, run by a verb), placed at the store root rather than in `workflows/` (**added P6**: absent from this table until `12_Masters_Thesis/.oms` was censused). It keeps the root position — this table assigns layers, and tidying placement here would make `reverse` land the file where it never was |
 | `state/verified-citations.json` | `config/scholar/` | ⑤(b) fails — **stays tracked**, approval item |
 | `wiki/{convention,decision,pattern,reference,history}/` · `wiki/INDEX.md` · `wiki/README.md` | `community/wiki/` | ② — same deferral as omp's row above; `INDEX.md`/`README.md` live *inside* `wiki/`, not at the store root (measured, workspace `.oms`) |
 | `<slug>/{versions,renders,research,outline,figure_survey,tmp,gen-image,methodology}/` | `work/scholar/<slug>/` | ④ |
@@ -630,5 +631,9 @@ hold).
 **Amended**: 2026-08-28 (P5) — §7 names the shipped tool · §9.2 is patterns, not a count ·
 §9.3 gains `omp env/`, `omd wiki/`, `omo INDEX.md`/`.hq-lock`, and corrects the `wiki/` and
 `knowledge/` targets to what P3 shipped · §9.5 counts the tool as a seventh declaration site
+**Amended**: 2026-08-28 (P6) — §9.3's `oms` table gains the store-root Workflow `.js` row,
+found when the `12_Masters_Thesis` dry-run refused it (`finding/015`'s rule, applied); the
+`venues/` and `workflows/` rows gain the sub-path the tool has always written, without which
+the new row's contrast with `workflows/*.js` is unreadable
 **Supersedes**: `campaign-protocol.md` §Layout and its owning-store table ·
 `omo/references/shared-context.md` §Layout — those sections now point here.

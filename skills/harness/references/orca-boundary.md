@@ -75,5 +75,5 @@ waits for one waits forever.
 In the 2026-08-26 incident the message did arrive — the sender simply could not
 confirm it, and what actually revived the worker was a file in the vault.
 
-`.orchestration/posts/handoff/` is the record. Orca may carry the notification; the
+`.hq/community/posts/handoff/` is the record. Orca may carry the notification; the
 file is what survives a lost ack, a dead daemon, and a machine that was asleep.

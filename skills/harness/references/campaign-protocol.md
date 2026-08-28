@@ -150,7 +150,7 @@ Four additions, each paid for by an incident:
 - A path without a branch means "whatever happens to be checked out".
 
 ## Reporting IS termination    ← 3 workers went idle silently, double-nagged twice
-- When done: append distilled lessons to .orchestration/agents/<role>.md, land your
+- When done: append distilled lessons to .hq/community/agents/<role>.md, land your
   post, set your board row to `reported`, then stop.
 - Going quiet is not completion. If you got nagged, you broke this line.
 - SubagentStop enforces this: it holds your exit until the row says reported.

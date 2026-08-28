@@ -1,14 +1,16 @@
 ---
 name: context-loader
-description: ALWAYS activate at the start of every task. Loads shared project context from .orchestration/ -- coding rules, recorded decisions, library constraints -- before executing anything.
+description: ALWAYS activate at the start of every task. Loads shared project context from the community store (.hq/community/, or the legacy .orchestration/) -- coding rules, recorded decisions, library constraints -- before executing anything.
 ---
 
 # Context Loader
 
 ## Purpose
 
-Load the shared project context from `.orchestration/` so this session works from the
-same rules as the Claude session that called it.
+Load the shared project context from the community store so this session works from the
+same rules as the Claude session that called it. The store is `.hq/community/`; a project
+that has not migrated yet still keeps it at `.orchestration/`. Check the first, fall back
+to the second, and use whichever you found for every path below.
 
 ## When to activate
 
@@ -16,12 +18,12 @@ same rules as the Claude session that called it.
 
 ## Steps
 
-1. **Read every file in `.orchestration/rules/`.** These are the constitution:
+1. **Read every file in `<store>/rules/`.** These are the constitution:
    `coding-principles.md`, `language.md`, `safety.md`, `evidence.md`, and
    `domain.md` when present. A project that tailored its payload may ship fewer;
    read what is there and do not assume a missing slot is empty.
 
-2. **Read `.orchestration/HUB.md`.** The decision table is the record of what this
+2. **Read `<store>/HUB.md`.** The decision table is the record of what this
    project already settled. Contradicting a recorded decision without saying so is
    the most expensive mistake available to you -- if your analysis contradicts one,
    name the decision and argue against it explicitly.
@@ -41,8 +43,8 @@ Asymmetric, and it matters:
 
 | Path | Who writes |
 |:---|:---|
-| `.orchestration/rules/` | The Claude session only. Read-only to you. |
-| `.orchestration/HUB.md` decision table | The session, and you -- append a row when you settle a design question. Never rewrite an existing row. |
+| `<store>/rules/` | The Claude session only. Read-only to you. |
+| `<store>/HUB.md` decision table | The session, and you -- append a row when you settle a design question. Never rewrite an existing row. |
 | A post's body | Its author. On a repo without git, nobody -- correct it by writing a new post whose `supersedes:` names the old one. |
 | A post's `## Comments` | You, and anyone. Append only; never rewrite someone else's line. |
 | Everything else in the repo | Per your role card. |
@@ -51,5 +53,5 @@ Asymmetric, and it matters:
 
 After loading, state in one line: which rule files you read, whether HUB.md had a
 decision bearing on this task, and any library or research note you pulled. If
-`.orchestration/` does not exist, say so and proceed on the task alone -- an absent
+neither `.hq/community/` nor `.orchestration/` exists, say so and proceed on the task alone -- an absent
 store is a fact to report, not a reason to stop.

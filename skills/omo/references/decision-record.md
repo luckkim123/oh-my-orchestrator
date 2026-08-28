@@ -1,7 +1,7 @@
 # Decision Record
 
 A design question settled in conversation and written nowhere is a question that
-gets re-asked, re-argued, and eventually answered differently. `.orchestration/HUB.md`
+gets re-asked, re-argued, and eventually answered differently. `.hq/community/HUB.md`
 carries the decision table so that does not happen -- and so a vendor loading the
 shared context sees what this project already settled before it advises against it.
 
@@ -62,7 +62,7 @@ that can read the decisions but not add to them makes the store one-directional,
 its conclusions die with the call.
 
 Nobody rewrites an existing row. Nobody, vendor or session, edits
-`.orchestration/rules/` -- see `shared-context.md` for the full write table.
+`.hq/community/rules/` -- see `shared-context.md` for the full write table.
 
 ## Before recording, check
 

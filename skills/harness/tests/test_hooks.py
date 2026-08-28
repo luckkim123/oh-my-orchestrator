@@ -1464,5 +1464,55 @@ class TestPreCompactDrift(unittest.TestCase):
         self.assertEqual(stderr, "", "stderr on this event is a user-visible refusal")
 
 
+class TestBoardPathFollowsTheStore(unittest.TestCase):
+    """P6: the store cutover moved the board, so board_path resolves both roots.
+
+    Resolving only the path the migration just vacated reads exactly like "no
+    active campaign" -- a silent off, which is the failure shape this whole
+    campaign keeps finding.
+    """
+
+    def setUp(self):
+        sys.path.insert(0, str(HOOKS_DIR))
+        import _harness_common as hc
+        self.hc = hc
+        self.root = Path(tempfile.mkdtemp())
+
+    def _board(self, rel):
+        p = self.root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text('{"status": "active", "tasks": [], "workers": []}')
+        return p
+
+    def test_migrated_anchor_resolves_the_hq_board(self):
+        want = self._board(".hq/runtime/board.json")
+        self.assertEqual(self.hc.board_path(self.root), want)
+        self.assertEqual(self.hc.find_harness_root({"cwd": str(self.root)}),
+                         self.root.resolve())
+
+    def test_unmigrated_project_still_resolves_the_legacy_board(self):
+        want = self._board(".orchestration/board.json")
+        self.assertEqual(self.hc.board_path(self.root), want)
+        self.assertEqual(self.hc.find_harness_root({"cwd": str(self.root)}),
+                         self.root.resolve())
+
+    def test_hq_board_wins_when_both_exist(self):
+        """During the fallback window an anchor can carry both. New wins."""
+        self._board(".orchestration/board.json")
+        want = self._board(".hq/runtime/board.json")
+        self.assertEqual(self.hc.board_path(self.root), want)
+
+    def test_absent_board_reports_the_legacy_path(self):
+        """Every existing message and test names the legacy string; keep it."""
+        self.assertEqual(self.hc.board_path(self.root),
+                         self.root / ".orchestration" / "board.json")
+        self.assertIsNone(self.hc.find_harness_root({"cwd": str(self.root)}))
+
+    def test_observations_sit_beside_whichever_board_was_found(self):
+        self._board(".hq/runtime/board.json")
+        self.assertEqual(self.hc.observations_jsonl(self.root),
+                         self.root / ".hq" / "runtime" / "observations.jsonl")
+
+
 if __name__ == "__main__":
     unittest.main()

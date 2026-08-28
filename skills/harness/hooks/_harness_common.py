@@ -110,13 +110,20 @@ def maybe_log_hook_event(root: Path, payload: dict[str, Any], hook_script: str) 
 # State root discovery
 # ---------------------------------------------------------------------------
 
+HQ_ROOT = ".hq"
 LEGACY_ROOT = ".orchestration"
+HQ_BOARD_REL = f"{HQ_ROOT}/runtime/board.json"
 BOARD_REL = f"{LEGACY_ROOT}/board.json"
 LEGACY_STATE = "harness-tasks.json"
 
-# Board file names a root, in preference order. A project that has migrated
-# carries the board; one that has not still carries the legacy state file.
-ROOT_MARKERS = (BOARD_REL, LEGACY_STATE)
+# Board file names a root, in preference order: the unified store's runtime
+# board first (store-spec.md section 9.3 -- board.json is the (3)/(5) tie that
+# (5) wins, so it lands in the ignored runtime layer), then the legacy board,
+# then the pre-board state file a project that never migrated still carries.
+# P6 added the first entry: the store cutover moved the board and the hooks
+# would otherwise resolve only the path the migration had just vacated, which
+# reads exactly like "no active campaign" -- a silent off, not an error.
+ROOT_MARKERS = (HQ_BOARD_REL, BOARD_REL, LEGACY_STATE)
 
 
 def _has_marker(base: Path) -> bool:
@@ -171,11 +178,19 @@ def legacy_root(root: Path) -> Path:
 
 
 def board_path(root: Path) -> Path:
-    return legacy_root(root) / "board.json"
+    """The board this root actually carries -- unified store first, legacy second.
+
+    Returns the `.hq/` path when it exists, else the legacy one. When neither
+    exists it returns the legacy path, so a project that never migrated keeps
+    the exact string every existing message and test already names.
+    """
+    new = root / HQ_BOARD_REL
+    return new if new.is_file() else legacy_root(root) / "board.json"
 
 
 def observations_jsonl(root: Path) -> Path:
-    return legacy_root(root) / "observations.jsonl"
+    """Sibling of the board, so it follows whichever board this root carries."""
+    return board_path(root).parent / "observations.jsonl"
 
 
 def agent_memory_md(root: Path, role: str) -> Path:

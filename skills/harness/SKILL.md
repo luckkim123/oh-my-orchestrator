@@ -61,7 +61,10 @@ the anchor rules. This table is only the operating surface.
 
 ## Activation Gate
 
-Hooks take effect only when `.orchestration/board.json` reads `"status": "active"`.
+Hooks take effect only when the board reads `"status": "active"`. The board is
+`.hq/runtime/board.json`; a project that has not migrated still keeps it at
+`.orchestration/board.json`, and `_harness_common.board_path()` resolves the first
+that exists.
 
 A closed campaign keeps its board on disk — preserving the posts is the convention —
 so *presence* of the file cannot mean active. The gate has to be a status bit.
@@ -92,7 +95,7 @@ done — which must **warn and read via fallback** rather than fall quiet.
 read `harness-tasks.json` as before. When both exist, the board wins. Migrate by
 writing `.orchestration/board.json` and removing the marker.
 
-## Board (`.orchestration/board.json`)
+## Board (`.hq/runtime/board.json`)
 
 The only state the hooks read. Seed: `templates/orchestration/board.json`.
 
@@ -132,7 +135,7 @@ work — do not revive it.
 | Hook | What it can do | Evidence |
 |---|---|---|
 | `SubagentStart` | **Inject only.** Its output schema carries one field, `additionalContext`, and the call site does not cancel a spawn on the hook's result. Both `exit 2` and a JSON `blockingError` were tried; the subagent ran either way. Its stderr never reaches the user. | 0-A, 0-B |
-| `SubagentStart` | **Observe only.** Board mismatches go to `.orchestration/observations.jsonl` *and* into the injected context, because the subagent is the only path a notice has to a human. | 0-A |
+| `SubagentStart` | **Observe only.** Board mismatches go to `observations.jsonl` beside the board *and* into the injected context, because the subagent is the only path a notice has to a human. | 0-A |
 | `SubagentStop` | **Enforce.** `exit 2` + stderr holds the exit and forces the subagent to resume. A JSON `{"decision": "block"}` gates it too; the code uses `exit 2`. | 0-C, 0-I |
 | `TeammateIdle` | **Never fires** for Agent-tool subagents. The Agent tool makes a `local_agent`; `TeammateIdle` is `in_process_teammate` only. The hook is kept wired for the day that changes, but nothing routes through it. | 0-C |
 | `Stop` | **Enforce.** Both conventions gate it. Holds the campaign's close until `board.json` records `cost.actual_tokens` — once, guarded on `stop_hook_active`. The payload carries no token counts, so the figure comes from the board and the hook only asks. | 0-F, 0-H |
@@ -186,14 +189,14 @@ that gets a hook switched off.
 
 1. Be on the board. An unregistered role is either a missing row or a spawn that does
    not belong to this campaign.
-2. Have written `.orchestration/agents/<role>.md` — 40 lines maximum, semantic rather
+2. Have written `.hq/community/agents/<role>.md` — 40 lines maximum, semantic rather
    than chronological, append-only.
-3. Have reported: a post under `.orchestration/posts/`, and `workers[].status` set to
+3. Have reported: a post under `.hq/community/posts/`, and `workers[].status` set to
    `reported`. **Reporting is what ends the work, not finishing it quietly.**
 
 ## Progress Persistence (Dual-File System)
 
-Two files, side by side: `.orchestration/board.json` holds structured state, and
+Two files, one per layer: `.hq/runtime/board.json` holds structured state, and
 `harness-progress.txt` holds the free-text log. The board says what is true now; the
 log says what happened. Neither substitutes for the other -- a failure count read
 only from the board is a self-report, which is why the Stop hook cross-checks it
@@ -216,7 +219,7 @@ Free-text log of all agent actions across sessions. Never truncate.
 [2025-07-01T10:20:02Z] [SESSION-1] STATS tasks_total=5 completed=1 failed=1 pending=3 blocked=0 attempts_total=2 checkpoints=1
 ```
 
-### `.orchestration/board.json` `tasks[]` (Structured State)
+### `.hq/runtime/board.json` `tasks[]` (Structured State)
 
 The shape below is the `tasks[]` array of the board, plus `session_config` and the
 session counters, which live at the board's top level alongside `status`, `workers`,
@@ -528,18 +531,20 @@ At session end, update `harness-tasks.json`: set `last_session` to current times
 
 ## Init Command (`/harness init`)
 
-1. Create `.orchestration/` and seed it from `templates/orchestration/`:
-   - `board.json` — `status: "active"`, empty `tasks`/`workers`, `cost.actual_tokens: null`
-   - `HUB.md` — the prose half: goal, the requester's words verbatim, decision table
-   - `rules/` — the payload vendor workers load on every task
-2. Create the empty working directories: `posts/`, `sessions/`, `agents/`
+1. Create `.hq/` and seed it from `templates/orchestration/`, splitting the seed
+   across the layers (store-spec.md §9.3):
+   - `.hq/.anchor` — one line, `id: <machine-unique-slug>`
+   - `.hq/runtime/board.json` — `status: "active"`, empty `tasks`/`workers`, `cost.actual_tokens: null`
+   - `.hq/community/HUB.md` — the prose half: goal, the requester's words verbatim, decision table
+   - `.hq/community/rules/` — the payload vendor workers load on every task
+2. Create the empty working directories under `.hq/community/`: `posts/`, `sessions/`, `agents/`
 3. Create `harness-progress.txt` with an initialization entry
 4. Install the vendor loaders for whichever CLIs this project uses, from
    `templates/vendor/` — see `skills/omo/references/shared-context.md`
 5. Optionally create `harness-init.sh` template (chmod +x)
-6. Ask the user: add `.orchestration/board.json` and `harness-progress.txt` to
-   `.gitignore`? The posts and `HUB.md` are usually worth committing — they are the
-   record; the board and the log are runtime state.
+6. Add the two store lines to `.gitignore` if they are missing: `**/.hq/work/` and
+   `**/.hq/runtime/`. That covers the board and `harness-progress.txt` in one rule —
+   the posts and `HUB.md` stay tracked under `community/`, because they are the record.
 
 **No `knowledge/` directory.** It used to be seeded here as
 `knowledge/libraries/_TEMPLATE.md`. That store is retired: verified facts now land as

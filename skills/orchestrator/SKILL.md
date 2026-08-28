@@ -22,7 +22,7 @@ holds them to it.
 | Piece | Where | What it gives you |
 |:---|:---|:---|
 | Vendor consultation | `omo` skill | The six roles, the three delegation grounds, the Context Pack |
-| Board and enforcement | `harness` skill | `.orchestration/board.json`, the activation gate, `SubagentStop` |
+| Board and enforcement | `harness` skill | `.hq/runtime/board.json`, the activation gate, `SubagentStop` |
 | Campaign protocol | `harness`, `references/campaign-protocol.md` | Launch proposal, posts, worker briefs, termination |
 | Lane boundary | `omo`, `references/lane-boundary.md` | What a vendor may be handed once a domain lane is running |
 
@@ -51,7 +51,7 @@ The board earns its cost when workers have to see each other's conclusions.
    rights with the branch named / estimated cost / termination condition. **This is
    the only human gate, and it is not optional.** A proposal missing termination is
    not a proposal.
-4. **Seed the board** on approval. `/harness init` creates `.orchestration/` from
+4. **Seed the board** on approval. `/harness init` creates `.hq/` from
    `templates/orchestration/`; fill `workers[]` from the approved proposal and
    `cost.estimated_tokens` from its fifth line.
 5. **Run.** Workers claim tasks, report, and stop. The Stop and SubagentStop hooks

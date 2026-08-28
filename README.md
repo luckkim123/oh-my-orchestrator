@@ -14,7 +14,7 @@ enforced by anything, so they quietly stop being true.
 
 This harness puts the rules where they can actually fire:
 
-- **One board.** `.orchestration/board.json` is the only state hooks read, and
+- **One board.** `.hq/runtime/board.json` is the only state hooks read, and
   its `status` field is the gate — when a campaign is closed, every hook exits 0
   immediately. `HUB.md` beside it is the prose humans read.
 - **One enforcement layer.** A `SubagentStop` hook rejects a worker that never
@@ -53,7 +53,7 @@ are in progress.
 | `skills/orchestrator` | Explicit entry point for a multi-vendor campaign. Composes the two below |
 | `skills/omo` | Role-scoped vendor orchestration and the delegation gate |
 | `skills/harness` | The enforcement layer: blocking checks, safety valve, claim locks |
-| `templates/orchestration/` | Seeds a project's `.orchestration/` shared knowledge store |
+| `templates/orchestration/` | Seeds a project's `.hq/` shared knowledge store |
 | `templates/vendor/` | Vendor-side loader configs, so a worker reads the store on every task |
 
 Other upstream modules (`bmad`, `requirements`, `sparv`, `do`, `course`,
