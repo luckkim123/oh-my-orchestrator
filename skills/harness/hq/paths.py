@@ -43,6 +43,10 @@ def hq_community_dir(base: Path) -> Path:
     return base / HQ_ROOT / "community"
 
 
+def hq_board_json(base: Path) -> Path:
+    return base / HQ_ROOT / "runtime" / "board.json"
+
+
 # --- .orchestration/ (legacy root -- live today) ----------------------------
 
 LEGACY_STATE_FILE = "harness-tasks.json"

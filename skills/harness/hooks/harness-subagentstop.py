@@ -36,7 +36,8 @@ def _read_hook_payload() -> dict[str, Any]:
 
 
 def _find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
-    """Locate the root holding .orchestration/board.json or harness-tasks.json."""
+    """Locate the root holding .hq/runtime/board.json, .orchestration/board.json,
+    or harness-tasks.json."""
     if hc is None:
         return None
     return hc.find_harness_root(payload)
@@ -104,10 +105,11 @@ def _campaign_failures(root: Path, state: dict[str, Any], role: str) -> list[str
 
     status = str(w.get("status") or "").strip()
     if status not in ("reported", "closed"):
+        posts_dir = hc.community_posts_dir(root)
         failures.append(
             f"board status for '{role}' is '{status or 'unset'}'. A worker reports "
-            "before it stops: land the post under .orchestration/posts/ and set "
-            "workers[].status to 'reported'. Reporting is what ends the work, not "
+            f"before it stops: land the post under {posts_dir.relative_to(root)}/ and "
+            "set workers[].status to 'reported'. Reporting is what ends the work, not "
             "finishing it quietly."
         )
     return failures

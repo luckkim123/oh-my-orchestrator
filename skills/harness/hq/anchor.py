@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import ANCHOR_REL, has_legacy_store, legacy_board_json
+from .paths import ANCHOR_REL, has_legacy_store, hq_board_json
 
 GATE_OFF = "off"
 GATE_LEGACY = "legacy"
@@ -138,7 +138,16 @@ def gate_state(root: Path) -> tuple:
         if dup_reports:
             return (GATE_CORRUPT, "; ".join(dup_reports))
 
-        board_path = legacy_board_json(root)
+        # store-spec §7 stage 2: this branch is only reached once anchor_file
+        # is confirmed to exist and parse (the unanchored case already
+        # returned above), so the board that matters here is the one an
+        # anchored project actually reads -- .hq/runtime/board.json, never
+        # the legacy .orchestration/board.json -- same rule board_path() in
+        # hooks/_harness_common.py and community_dir() in store.py follow.
+        # Before this fix, an anchored project's corrupt .hq/runtime/
+        # board.json went unexamined here: this check looked at the legacy
+        # path unconditionally, so GATE_CORRUPT could never fire for it.
+        board_path = hq_board_json(root)
         if board_path.is_file():
             try:
                 json.loads(board_path.read_text(encoding="utf-8"))

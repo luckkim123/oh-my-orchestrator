@@ -9,10 +9,24 @@ This spec supersedes the per-harness layout rules that used to live in
 rule below traces to a measurement on the machine `ksm-mac`, dated 2026-08-27 unless
 stated otherwise.
 
-> **Status: design frozen, not yet built.** Phase 0 of the store-unification plan
-> froze this spec. No file has moved. Every harness still writes its legacy `.om?`
-> store, and the four-state hook table below describes the *target* behavior, not
-> what ships today. Cutover is per-harness and gated — see §Migration state.
+> **Status: cutover in progress, per harness.** Phase 0 (2026-08-27) froze this
+> spec's design; every harness has since migrated its file content (§9.1) and
+> shipped code against it. As of 2026-08-28, all six harnesses — `omp` (0.16.0),
+> `oms` (0.20.0), `omd` (0.11.0), `omx` (0.14.0), `omha` (0.10.0), `omo` (0.8.0,
+> this release) — have shipped §7 **stage 2** (fallback removal): an anchored
+> project resolves reads and writes to `.hq/` only, no legacy fallback. `oms`
+> was still on stage 1 earlier the same day (a mid-edit read of its released
+> 0.19.0), corrected here after re-reading its own `hooks/oms_paths.py` at its
+> current 0.20.0 state, not taken on a second-hand count. The four-state hook
+> table below (§6) describes the stage-2 rule; §9.1 tracks per-anchor
+> file-migration progress.
+>
+> Stage 3 (`--purge`) has **not** run. Every legacy store on `ksm-mac` is still
+> on disk, and each harness's release only stops *reading* it. Deleting them is
+> a separate per-anchor decision, and one more thing has to happen first: hooks
+> execute from `~/.claude/plugins/cache/`, not from these repos, so a pushed
+> release changes nothing about what a session is told until that cache picks
+> up the new version.
 
 ---
 
@@ -289,21 +303,24 @@ nest, and a repo-root-relative rule misses the nested ones:
 **/.hq/runtime/
 ```
 
-**Do not remove the legacy lines yet.** `.omp/work/`, `.omha/`, `.omd/`, `.oms/`, `.omx/`
-stay until the fallback-removal release for that specific harness. Removing a legacy
-ignore line while the fallback window is still open means every write that lands on the
-old path during that window leaks into git as a tracked file.
+**The per-harness legacy ignore lines are removed, as of this round (§9.4).** `oms`
+dropped `.oms/`, `omd` dropped `.omd/`, `omha` dropped `.omha/redact-patterns.txt`, `omx`
+dropped `.omx/`; `omp` and `omo` never had one of their own to drop. What remains is not
+a per-harness line still pending its own fallback-removal release — every harness has
+had that release now — it is two *other* repos that each host anchors for multiple
+harnesses: `claudebase`'s own `.omp/*` + `!.omp/rules.json` and `**/.orchestration/
+.hq-lock`, and the vault's `.omp/work/` · `.omp/state/` · `.omha/` · `**/.orchestration/
+.hq-lock`. Those come after `--purge` (§7 stage 3), which has not run anywhere on this
+machine — removing an ignore line ahead of the purge would leak the about-to-be-deleted
+legacy directory into git as a tracked file the moment anything touches it.
 
-### The tracked/ignored boundary shifts for three repos — needs approval
+### The tracked/ignored boundary shift for three repos
 
-`oh-my-docs`, `oh-my-scholar`, and `oh-my-experiments` currently ignore their **entire**
+`oh-my-docs`, `oh-my-scholar`, and `oh-my-experiments` used to ignore their **entire**
 store (`.omd/`, `.oms/`, `.omx/`). Under the new layout `config/` and `community/` are
-tracked, so `learned.md` — today invisible to git in those repos — becomes a committed
-file.
-
-That is a policy change, not a mechanical one, and it is **flagged per repo in the
-mapping table (§9.4) as `policy-shift`**. Each needs the repo owner's approval at its
-cutover, not a silent adoption.
+tracked, so `learned.md` — previously invisible to git in those repos — is now a
+committed file. That shift has landed in all three repos this round, flagged per repo in
+the mapping table (§9.4) as `policy-shift`; it is no longer a pending decision.
 
 ---
 
@@ -314,7 +331,7 @@ The gate is the pair (legacy `.om?` store, `.hq/.anchor`), never a single marker
 | Legacy `.om?` store | `.hq/.anchor` | Behavior |
 |:---|:---|:---|
 | absent | absent | feature **off, exit 0** — a repo that does not use this harness |
-| **present** | absent | **warn + read via fallback** — migration not yet done |
+| **present** | absent | **warn — unmigrated legacy store, reads will not find it** (§7 stage 2: no fallback) |
 | — | present, valid | normal operation (no board = no active campaign = normal off) |
 | — | present, **corrupt** | **loud failure, exit non-zero** |
 
@@ -580,7 +597,20 @@ gate", and that deferral was the assignment):
 ### 9.4 `.gitignore` amendments per repo
 
 Every repo gets the two `**/.hq/` lines. Legacy lines stay until that harness's
-fallback-removal release.
+fallback-removal release — reached, as of 2026-08-28, for all six: `oms` removed
+`.oms/`, `omd` removed `.omd/`, `omha` removed `.omha/redact-patterns.txt`, `omx`
+removed `.omx/` (with an explanatory comment left in its place), `omp` never had
+a legacy ignore line of its own to remove (the table's `.omp/*` line below
+belongs to `claudebase`, not to `oh-my-project`), `omo` has none. Independently
+verified per repo (not taken on report) with `grep -n '\.omp\|\.oms\|\.omd\|\.omx\|\.omha'
+.gitignore` against each of the five sibling checkouts on this machine.
+
+Outstanding, and this is **not** the same as the removals above — these come
+after `--purge` (§7 stage 3), which has not run on this machine: `claudebase`'s
+own `.omp/*` + `!.omp/rules.json` and `**/.orchestration/.hq-lock`, and the
+vault's `.omp/work/` · `.omp/state/` · `.omha/` · `**/.orchestration/.hq-lock`.
+No file has been deleted anywhere in this campaign; only ignore lines for
+already-migrated, still-present legacy directories have been dropped.
 
 | Repo | Legacy lines today | Note |
 |:---|:---|:---|
@@ -660,5 +690,31 @@ hold).
 found when the `12_Masters_Thesis` dry-run refused it (`finding/015`'s rule, applied); the
 `venues/` and `workflows/` rows gain the sub-path the tool has always written, without which
 the new row's contrast with `workflows/*.js` is unreadable
+**Amended**: 2026-08-28 (omo §7 stage 2) — the top Status box, §6 row 2, and §9.4 now
+describe the anchor-gated stage-2 rule instead of the P1-era existence fallback; omo's own
+`hq/store.py:community_dir()` and `_harness_common.py`'s `board_path()`/`agent_memory_md()`/
+`hub_md()` were the last legacy-only resolvers in this repo and are now anchor-gated to
+match. Cross-checked against the other five harnesses' own `*_paths.py` docstrings rather
+than assumed: `omp`/`omd`/`omx`/`omha` confirm stage 2 shipped; `oms` does not — its
+`hooks/oms_paths.py` docstring still describes stage-1 per-file existence fallback as of its
+0.19.0 release, so this amendment reports five of six, not all six
+**Amended**: 2026-08-28 (correction, same day) — the "five of six" line above was a
+mid-edit read: `oms` had a sibling agent landing its own stage-2 release in the same
+working tree while it was being checked. Re-read `~/oh-my-scholar/hooks/oms_paths.py`
+directly at its current 0.20.0 state (not on report) and confirmed: "Stage 2 (store-spec
+§7) removes that per-file read fallback. Reads and writes now resolve identically." All
+six harnesses ship stage 2 in this round — `omp` 0.16.0, `oms` 0.20.0, `omd` 0.11.0, `omx`
+0.14.0, `omha` 0.10.0, `omo` 0.8.0 — none pushed yet. The top Status box and §9.4 are
+updated to match; `hq/anchor.py:141`'s `gate_state()` corrupt-board check had the same
+legacy-only shape as the two P7 fixes above (checked `.orchestration/board.json`
+unconditionally even once anchored) and is now anchor-gated too, via a new
+`hq_board_json()` in `hq/paths.py`
+**Amended**: 2026-08-28 (§5 correction) — "do not remove the legacy lines yet" was
+correct on 08-27 and is false now that all six harnesses have shipped their
+fallback-removal release: the per-harness lines are gone (§9.4), and the "needs
+approval" framing on the three-repo tracked/ignored shift is resolved (shipped, not
+pending). §5 now describes the current state — done vs. outstanding-until-`--purge` —
+instead of a still-open instruction five other repos' next sessions would otherwise
+read and wrongly obey
 **Supersedes**: `campaign-protocol.md` §Layout and its owning-store table ·
 `omo/references/shared-context.md` §Layout — those sections now point here.

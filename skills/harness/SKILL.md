@@ -62,9 +62,10 @@ the anchor rules. This table is only the operating surface.
 ## Activation Gate
 
 Hooks take effect only when the board reads `"status": "active"`. The board is
-`.hq/runtime/board.json`; a project that has not migrated still keeps it at
-`.orchestration/board.json`, and `_harness_common.board_path()` resolves the first
-that exists.
+`.hq/runtime/board.json` for an anchored project (a parseable `.hq/.anchor`); a
+project without an anchor still keeps it at `.orchestration/board.json`.
+`_harness_common.board_path()` is anchor-gated (store-spec §7 stage 2) — the
+anchor alone decides, no existence check and no fallback in either direction.
 
 A closed campaign keeps its board on disk — preserving the posts is the convention —
 so *presence* of the file cannot mean active. The gate has to be a status bit.
@@ -82,7 +83,8 @@ so *presence* of the file cannot mean active. The gate has to be a status bit.
 That is two of four states. The full gate is the pair (legacy `.om?` store,
 `.hq/.anchor`) and `references/store-spec.md` §6 owns the table. The state it adds that
 this section cannot express is "legacy store present, anchor absent" — migration not yet
-done — which must **warn and read via fallback** rather than fall quiet.
+done — which must **warn: reads will not find the legacy store** (store-spec §7 stage 2
+has no fallback) rather than fall quiet.
 
 > **Implemented.** The loud-failure branch lives in `hq/anchor.py`'s `gate_state()`,
 > wired into every hook via `_harness_common.gate_corrupt_reason()`. Unit fixtures for

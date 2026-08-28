@@ -43,7 +43,8 @@ def _read_payload() -> dict[str, Any]:
 
 
 def _find_state_root(payload: dict[str, Any]) -> Optional[Path]:
-    """Locate the root holding .orchestration/board.json or harness-tasks.json."""
+    """Locate the root holding .hq/runtime/board.json, .orchestration/board.json,
+    or harness-tasks.json."""
     if hc is None:
         return None
     return hc.find_harness_root(payload)

@@ -13,7 +13,9 @@ So it does two things only:
    `hookSpecificOutput.additionalContext`. Only the nested form is honored --
    a top-level `additionalContext` is ignored -- and the payload is capped at
    10000 characters, above which Claude Code truncates it to a preview.
-2. **Observe.** Board mismatches are appended to `.orchestration/observations.jsonl`
+2. **Observe.** Board mismatches are appended to `observations.jsonl`, sitting
+   beside whichever board this root actually carries (`.hq/runtime/` for an
+   anchored project, `.orchestration/` otherwise -- store-spec.md §7 stage 2),
    and restated inside the injected context, so the subagent itself can report
    them. SubagentStop is where they are enforced.
 """
@@ -125,7 +127,7 @@ def build_context(root: Path, role: str, state: dict[str, Any], notices: list[st
     else:
         parts.append(
             f"\n## What this role has learned\n\nNothing yet -- "
-            f".orchestration/agents/{role}.md does not exist. Write it before you "
+            f"{memory.relative_to(root)} does not exist. Write it before you "
             "stop: 40 lines maximum, semantic rather than chronological, append-only."
         )
 

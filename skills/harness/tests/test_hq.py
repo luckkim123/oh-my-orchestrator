@@ -45,7 +45,12 @@ def _write_anchor(root: Path, anchor_id: str) -> None:
 def _write_post(root: Path, category: str, number: int, *, title: str,
                  extra_bullets: str = "", body: str = "body text.",
                  with_comments: bool = True) -> Path:
-    d = root / ".orchestration" / "posts" / category
+    # store-spec §7 stage 2: goes through store.community_dir() rather than
+    # hardcoding `.orchestration/`, so it lands wherever the fixture's own
+    # anchor state actually resolves -- `.hq/community/posts/` when the
+    # caller wrote a `.hq/.anchor` first (every caller here except the two
+    # no-anchor fixtures below), `.orchestration/posts/` otherwise.
+    d = store.community_dir(root) / "posts" / category
     d.mkdir(parents=True, exist_ok=True)
     fm = f"- id: {category}/{number:03d} · date: 2026-08-27 · author: test\n"
     if extra_bullets:
@@ -225,7 +230,7 @@ class LintPlantedDefectsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_anchor(root, "t1")
-            d = root / ".orchestration" / "posts" / "finding"
+            d = store.community_dir(root) / "posts" / "finding"
             d.mkdir(parents=True)
             (d / "001-a.md").write_text(
                 "# A\n\n- id: finding/001 · date: 2026-08-27 · author: t\n\nbody\n",
@@ -276,15 +281,32 @@ class GateStateTest(unittest.TestCase):
             state, _reason = anchor.gate_state(root)
             self.assertEqual(state, GATE_NORMAL)
 
-    def test_valid_anchor_with_invalid_board_json_is_corrupt(self):
+    def test_valid_anchor_with_invalid_hq_board_json_is_corrupt(self):
+        """store-spec §7 stage 2: once an anchor exists, the board that
+        matters is .hq/runtime/board.json -- a corrupt .orchestration/
+        board.json is never even looked at (see the test right below)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "t1")
+            (root / ".hq" / "runtime").mkdir(parents=True)
+            (root / ".hq" / "runtime" / "board.json").write_text("{invalid", encoding="utf-8")
+            state, reason = anchor.gate_state(root)
+            self.assertEqual(state, GATE_CORRUPT)
+            self.assertTrue(reason)
+
+    def test_valid_anchor_with_invalid_legacy_board_json_is_not_examined(self):
+        """The other half of the same fix: a corrupt .orchestration/
+        board.json is no longer read once an anchor exists -- it is not
+        this project's live board anymore, so gate_state() must not trip on
+        it (an anchored project with no .hq/ board is a normal off state,
+        same as no board at all)."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_anchor(root, "t1")
             (root / ".orchestration").mkdir()
             (root / ".orchestration" / "board.json").write_text("{invalid", encoding="utf-8")
-            state, reason = anchor.gate_state(root)
-            self.assertEqual(state, GATE_CORRUPT)
-            self.assertTrue(reason)
+            state, _reason = anchor.gate_state(root)
+            self.assertEqual(state, GATE_NORMAL)
 
 
 class EditNoGitAnchorTest(unittest.TestCase):

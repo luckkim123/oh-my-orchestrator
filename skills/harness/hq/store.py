@@ -9,8 +9,8 @@ import re
 import time
 from pathlib import Path
 
-from .anchor import HqError
-from .paths import HQ_LOCK_NAME, hq_community_dir, legacy_root
+from .anchor import HqError, parse_anchor
+from .paths import ANCHOR_REL, HQ_LOCK_NAME, hq_community_dir, legacy_root
 from .post import Post, parse_post, serialize_post
 
 INDEX_NAME = "INDEX.md"
@@ -19,11 +19,26 @@ _FILENAME_NUM_RE = re.compile(r"^(\d{3})-")
 
 
 def community_dir(anchor_root: Path) -> Path:
-    """D-P1-1: resolve to .hq/community/ once it exists, else fall back to
-    .orchestration/. Reads and writes both go to whichever this returns —
-    today that is always .orchestration/ (P1 target)."""
-    new = hq_community_dir(anchor_root)
-    return new if new.is_dir() else legacy_root(anchor_root)
+    """store-spec.md §7 stage 2 (fallback removal): the anchor decides, per
+    project, in both directions. A project with a parseable `.hq/.anchor`
+    resolves reads and writes to `.hq/community/` only -- no fallback to
+    `.orchestration/`, even when a legacy copy still exists on disk. A
+    project without an anchor keeps resolving to `.orchestration/`, exactly
+    as it always has, so a machine that never migrated keeps working.
+
+    An unparseable anchor is treated as absent (falls back to the legacy
+    path) rather than routed into a half-broken `.hq/` structure -- the
+    loud GATE_CORRUPT failure is a separate concern, surfaced by
+    hq.anchor.gate_state() at the hook layer."""
+    anchor_file = anchor_root / ANCHOR_REL
+    if anchor_file.is_file():
+        try:
+            parse_anchor(anchor_file)
+        except HqError:
+            pass
+        else:
+            return hq_community_dir(anchor_root)
+    return legacy_root(anchor_root)
 
 
 def posts_dir(anchor_root: Path) -> Path:

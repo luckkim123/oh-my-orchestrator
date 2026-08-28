@@ -46,7 +46,8 @@ def _resolve_anchor_id(anchor_root: Path) -> str:
 def _resolve_anchor_roots_for_query(start: Path) -> list:
     """Ascent for query()/lint(): prefer the strict .hq/.anchor chain; use
     the single nearest legacy-store root when no .hq/.anchor exists anywhere
-    in the ascent (today's reality for both P1 target stores)."""
+    in the ascent -- root DISCOVERY only, unaffected by §7 stage 2 (which
+    anchor-gates path RESOLUTION downstream, in store.py)."""
     try:
         anchors = find_anchors(start)
     except HqError:

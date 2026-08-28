@@ -241,7 +241,12 @@ class TestCorruptGate(unittest.TestCase):
         (d / ".anchor").write_text(f"id: {anchor_id}\n", encoding="utf-8")
 
     def _write_board(self, content: str) -> None:
-        d = self.root / ".orchestration"
+        # store-spec §7 stage 2: gate_state()'s corrupt-board check (reached
+        # only once an anchor is confirmed present) reads .hq/runtime/
+        # board.json now, not .orchestration/board.json -- every caller here
+        # writes the anchor first, so this always lands where gate_state()
+        # actually looks.
+        d = self.root / ".hq" / "runtime"
         d.mkdir(parents=True, exist_ok=True)
         (d / "board.json").write_text(content, encoding="utf-8")
 
@@ -302,7 +307,7 @@ class TestCorruptGate(unittest.TestCase):
         code, stdout, stderr = run_hook(STOP_HOOK, self._payload())
         self.assertEqual(code, 0, stderr)
 
-        # normal: valid .hq/.anchor, no board.json under .orchestration/.
+        # normal: valid .hq/.anchor, no board.json under .hq/runtime/.
         self._write_anchor()
         code, stdout, stderr = run_hook(STOP_HOOK, self._payload())
         self.assertEqual(code, 0, stderr)
@@ -1465,11 +1470,11 @@ class TestPreCompactDrift(unittest.TestCase):
 
 
 class TestBoardPathFollowsTheStore(unittest.TestCase):
-    """P6: the store cutover moved the board, so board_path resolves both roots.
-
-    Resolving only the path the migration just vacated reads exactly like "no
-    active campaign" -- a silent off, which is the failure shape this whole
-    campaign keeps finding.
+    """store-spec.md §7 stage 2 (fallback removal): the resolvers are
+    anchor-gated, not existence-gated. A parseable `.hq/.anchor` sends a
+    project to `.hq/` only -- no fallback to the legacy path, even when a
+    legacy file still exists on disk. No anchor sends it to the legacy path
+    only -- exactly as before stage 2 -- even when a `.hq/` file exists.
     """
 
     def setUp(self):
@@ -1484,34 +1489,73 @@ class TestBoardPathFollowsTheStore(unittest.TestCase):
         p.write_text('{"status": "active", "tasks": [], "workers": []}')
         return p
 
-    def test_migrated_anchor_resolves_the_hq_board(self):
-        want = self._board(".hq/runtime/board.json")
+    def _anchor(self, anchor_id: str = "t1") -> None:
+        d = self.root / ".hq"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / ".anchor").write_text(f"id: {anchor_id}\n", encoding="utf-8")
+
+    def test_anchored_project_resolves_hq_board_when_only_legacy_file_exists(self):
+        """Acceptance (a): stage 2 has no fallback -- the anchor alone decides."""
+        self._anchor()
+        self._board(".orchestration/board.json")
+        want = self.root / ".hq" / "runtime" / "board.json"
+        self.assertEqual(self.hc.board_path(self.root), want)
+
+    def test_unanchored_project_resolves_legacy_board_when_only_hq_file_exists(self):
+        """Acceptance (b): no anchor means legacy only, exactly as before
+        stage 2 -- even though root discovery (a separate concern) still
+        finds this root via the .hq marker (store-spec §6's ROOT_MARKERS)."""
+        self._board(".hq/runtime/board.json")
+        want = self.root / ".orchestration" / "board.json"
         self.assertEqual(self.hc.board_path(self.root), want)
         self.assertEqual(self.hc.find_harness_root({"cwd": str(self.root)}),
                          self.root.resolve())
 
-    def test_unmigrated_project_still_resolves_the_legacy_board(self):
-        want = self._board(".orchestration/board.json")
-        self.assertEqual(self.hc.board_path(self.root), want)
-        self.assertEqual(self.hc.find_harness_root({"cwd": str(self.root)}),
-                         self.root.resolve())
-
-    def test_hq_board_wins_when_both_exist(self):
-        """During the fallback window an anchor can carry both. New wins."""
+    def test_anchored_project_resolves_hq_board_when_both_exist(self):
+        self._anchor()
         self._board(".orchestration/board.json")
         want = self._board(".hq/runtime/board.json")
         self.assertEqual(self.hc.board_path(self.root), want)
 
-    def test_absent_board_reports_the_legacy_path(self):
+    def test_unanchored_project_resolves_legacy_board_when_both_exist(self):
+        want = self._board(".orchestration/board.json")
+        self._board(".hq/runtime/board.json")
+        self.assertEqual(self.hc.board_path(self.root), want)
+
+    def test_unanchored_project_with_neither_file_still_reports_the_legacy_path(self):
         """Every existing message and test names the legacy string; keep it."""
         self.assertEqual(self.hc.board_path(self.root),
                          self.root / ".orchestration" / "board.json")
         self.assertIsNone(self.hc.find_harness_root({"cwd": str(self.root)}))
 
-    def test_observations_sit_beside_whichever_board_was_found(self):
-        self._board(".hq/runtime/board.json")
+    def test_unparseable_anchor_is_read_as_absent_and_falls_back_to_legacy(self):
+        """A corrupt anchor is not routed into a half-broken `.hq/` -- that
+        loud failure is gate_corrupt_reason()'s job, at hook entry, separate
+        from this resolver."""
+        d = self.root / ".hq"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / ".anchor").write_text("not an id line\nsecond line\n", encoding="utf-8")
+        want = self._board(".orchestration/board.json")
+        self.assertEqual(self.hc.board_path(self.root), want)
+
+    def test_observations_sit_beside_whichever_board_the_anchor_resolves(self):
+        self._anchor()
         self.assertEqual(self.hc.observations_jsonl(self.root),
                          self.root / ".hq" / "runtime" / "observations.jsonl")
+
+    def test_agent_memory_and_hub_resolve_to_hq_community_on_an_anchored_project(self):
+        """Acceptance (c)."""
+        self._anchor()
+        self.assertEqual(self.hc.agent_memory_md(self.root, "orca"),
+                         self.root / ".hq" / "community" / "agents" / "orca.md")
+        self.assertEqual(self.hc.hub_md(self.root),
+                         self.root / ".hq" / "community" / "HUB.md")
+
+    def test_agent_memory_and_hub_resolve_to_legacy_on_an_unanchored_project(self):
+        self.assertEqual(self.hc.agent_memory_md(self.root, "orca"),
+                         self.root / ".orchestration" / "agents" / "orca.md")
+        self.assertEqual(self.hc.hub_md(self.root),
+                         self.root / ".orchestration" / "HUB.md")
 
 
 if __name__ == "__main__":

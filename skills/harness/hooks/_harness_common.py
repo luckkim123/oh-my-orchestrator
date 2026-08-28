@@ -18,6 +18,7 @@ import datetime as _dt
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -113,8 +114,12 @@ def maybe_log_hook_event(root: Path, payload: dict[str, Any], hook_script: str) 
 HQ_ROOT = ".hq"
 LEGACY_ROOT = ".orchestration"
 HQ_BOARD_REL = f"{HQ_ROOT}/runtime/board.json"
+HQ_ANCHOR_REL = f"{HQ_ROOT}/.anchor"
+HQ_COMMUNITY_REL = f"{HQ_ROOT}/community"
 BOARD_REL = f"{LEGACY_ROOT}/board.json"
 LEGACY_STATE = "harness-tasks.json"
+
+_HQ_ANCHOR_ID_RE = re.compile(r"^id:\s*(\S.*)$")
 
 # Board file names a root, in preference order: the unified store's runtime
 # board first (store-spec.md section 9.3 -- board.json is the (3)/(5) tie that
@@ -131,7 +136,11 @@ def _has_marker(base: Path) -> bool:
 
 
 def find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
-    """Locate the directory holding .orchestration/board.json or harness-tasks.json.
+    """Locate the directory holding .hq/runtime/board.json, .orchestration/
+    board.json, or harness-tasks.json -- root DISCOVERY checks all three
+    ROOT_MARKERS regardless of anchor state (store-spec.md §6 requires an
+    unmigrated project stay findable); only path RESOLUTION for a found root
+    (board_path(), agent_memory_md(), hub_md(), etc.) is anchor-gated.
 
     Search order:
     1. HARNESS_STATE_ROOT env var
@@ -170,22 +179,62 @@ def find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
 
 
 # ---------------------------------------------------------------------------
-# Board (.orchestration/board.json)
+# Board and community resolvers -- anchor-gated (.hq/) with legacy fallback
+# for an unanchored project (.orchestration/) (store-spec.md §7 stage 2)
 # ---------------------------------------------------------------------------
 
 def legacy_root(root: Path) -> Path:
     return root / LEGACY_ROOT
 
 
-def board_path(root: Path) -> Path:
-    """The board this root actually carries -- unified store first, legacy second.
+def _has_hq_anchor(root: Path) -> bool:
+    """store-spec.md §7 stage 2 (fallback removal): a parseable `.hq/.anchor`
+    is what switches a project's reads and writes to `.hq/` -- in both
+    directions, unconditionally, with no existence check on the target path
+    (an anchored project resolves to `.hq/` even when only a legacy file
+    exists; an unanchored one resolves to the legacy path even when a `.hq/`
+    file exists). An unparseable anchor is read as "no anchor" here -- it
+    falls back to the legacy path rather than routing into a half-broken
+    `.hq/` structure -- because the loud GATE_CORRUPT failure is a separate
+    concern already surfaced by gate_corrupt_reason() below, at hook entry,
+    before any resolver in this file is reached on the normal hook path.
 
-    Returns the `.hq/` path when it exists, else the legacy one. When neither
-    exists it returns the legacy path, so a project that never migrated keeps
-    the exact string every existing message and test already names.
+    Reimplements hq/anchor.py's one-line parse_anchor() rule locally rather
+    than importing it -- same reason HQ_ROOT/LEGACY_ROOT above are
+    redeclared rather than imported, per this module's docstring: a
+    cross-package import in every hook's hot path (this function is called
+    on every board/agent-memory/HUB read) trades literal-drift risk for
+    availability risk. Every sibling harness (omp/oms/omd/omx/omha) makes
+    the identical call in its own *_paths.py module.
     """
-    new = root / HQ_BOARD_REL
-    return new if new.is_file() else legacy_root(root) / "board.json"
+    f = root / HQ_ANCHOR_REL
+    if not f.is_file():
+        return False
+    try:
+        raw = f.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    text = raw[:-1] if raw.endswith("\n") else raw
+    non_empty = [line for line in text.split("\n") if line.strip() != ""]
+    if len(non_empty) != 1:
+        return False
+    m = _HQ_ANCHOR_ID_RE.match(non_empty[0])
+    return bool(m and m.group(1).strip())
+
+
+def board_path(root: Path) -> Path:
+    """The board this root actually carries -- anchor-gated (store-spec.md
+    §7 stage 2), not existence-gated.
+
+    A project with a parseable `.hq/.anchor` resolves to `.hq/runtime/
+    board.json` only -- no fallback to the legacy path, even when a legacy
+    board still exists on disk. A project without an anchor resolves to the
+    legacy board, exactly as it always has, so a machine that never
+    migrated keeps working.
+    """
+    if _has_hq_anchor(root):
+        return root / HQ_BOARD_REL
+    return legacy_root(root) / "board.json"
 
 
 def observations_jsonl(root: Path) -> Path:
@@ -194,11 +243,31 @@ def observations_jsonl(root: Path) -> Path:
 
 
 def agent_memory_md(root: Path, role: str) -> Path:
+    if _has_hq_anchor(root):
+        return root / HQ_COMMUNITY_REL / "agents" / f"{role}.md"
     return legacy_root(root) / "agents" / f"{role}.md"
 
 
 def hub_md(root: Path) -> Path:
+    if _has_hq_anchor(root):
+        return root / HQ_COMMUNITY_REL / "HUB.md"
     return legacy_root(root) / "HUB.md"
+
+
+def community_posts_dir(root: Path) -> Path:
+    if _has_hq_anchor(root):
+        return root / HQ_COMMUNITY_REL / "posts"
+    return legacy_root(root) / "posts"
+
+
+def knowledge_dir(root: Path) -> Path:
+    """store-spec.md §9.3 (omo table): the layer moved to `.hq/community/
+    knowledge/` in P7; full absorption into the post schema (§4) is a
+    separate, deferred P6 item -- the directory still exists as its own
+    thing under either root."""
+    if _has_hq_anchor(root):
+        return root / HQ_COMMUNITY_REL / "knowledge"
+    return legacy_root(root) / "knowledge"
 
 
 def state_path(root: Path) -> Path:

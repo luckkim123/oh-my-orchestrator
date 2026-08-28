@@ -2,6 +2,88 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-08-28
+
+> This is the first `0.x` entry in this file — recent `0.4.0`–`0.7.2` plugin
+> releases were versioned in `.claude-plugin/plugin.json` and commit
+> messages only, without a CHANGELOG entry. This file's numbering above is a
+> separate, older product line (`codeagent`/install-wrapper) that stopped
+> being updated well before the `omo`/harness plugin split; the two version
+> lines are unrelated.
+
+### 🚀 Features
+
+- feat(store): om\* store unification P7 — `oh-my-orchestrator` (harness slot
+  `omo`) ships `store-spec.md` §7 stage 2, fallback removal. A project with a
+  parseable `.hq/.anchor` now resolves reads and writes to `.hq/` only, in
+  both directions, with no existence-based fallback to `.orchestration/`; a
+  project without an anchor keeps resolving to `.orchestration/` exactly as
+  before.
+
+### 🐛 Bug Fixes
+
+- fix(hooks): `_harness_common.py`'s `agent_memory_md()` and `hub_md()`
+  resolved to `.orchestration/` unconditionally — no `.hq/` path at all, even
+  on an anchored project. Both are now anchor-gated like every other
+  resolver in this repo.
+- fix(store): `hq/store.py`'s `community_dir()` was existence-gated (`.hq/
+  community` wins only if the directory already exists), which left an
+  anchored-but-not-yet-copied project split-brained between the two stores.
+  Now anchor-gated per store-spec §7 stage 2.
+- fix(anchor): `hq/anchor.py`'s `gate_state()` corrupt-board check read
+  `.orchestration/board.json` unconditionally, even once an anchor existed —
+  the same legacy-only shape as the two fixes above, found after the first
+  round shipped. A corrupt `.hq/runtime/board.json` on an anchored project
+  could never trip `GATE_CORRUPT`. Anchor-gated via a new `hq_board_json()`
+  in `hq/paths.py`; a corrupt legacy board.json is now correctly *not*
+  examined once anchored (`GateStateTest` covers both directions). Widened
+  the resolver audit to all of `skills/harness/` (not just the two files the
+  first round scoped) by grepping `legacy_root(`/`LEGACY_ROOT`/
+  `legacy_board_json(`/`has_legacy_store(` across the whole tree and reading
+  every hit — this is how `gate_state()` was found. Nothing else turned up a
+  fourth instance: every remaining hit is either root *discovery* (which
+  must keep finding both `.hq/` and legacy markers — `find_harness_root()`,
+  `find_anchor_root()`, `_resolve_anchor_roots_for_query()` — untouched by
+  design), a `/tmp`-hash lock file or session-tempdir counter unrelated to
+  the store split, or `Post.is_legacy` (a *schema*-legacy check on missing
+  post fields, an unrelated meaning of "legacy" that happens to share the
+  word). One docstring staleness found in passing outside that grep's scope
+  (`hq/verbs.py`'s `_resolve_anchor_roots_for_query`, a stale "today's
+  reality for both P1 target stores" parenthetical) corrected for accuracy.
+- fix(hooks): swept every hook-injected string and docstring naming
+  `.orchestration/` literally — `harness-subagentstart.py`'s "what this role
+  has learned" notice, `harness-subagentstop.py`'s "land the post under"
+  failure message, and `self-reflect-stop.py`'s knowledge-mining checklist —
+  to resolve dynamically via `agent_memory_md()`/`community_posts_dir()`/
+  `knowledge_dir()`/`hub_md()` (`community_posts_dir()` and `knowledge_dir()`
+  new in `_harness_common.py`). Left untouched: `LEGACY_ROOT = ".orchestration"`
+  itself and every string genuinely about the unmigrated-legacy-store case
+  (SKILL.md's `harness-tasks.json`→`board.json` migration note, the CLI's
+  dual-ascent doc). Also corrected six identical stale `find_harness_root()`
+  wrapper docstrings (named only the legacy marker; the function has checked
+  `.hq/runtime/board.json` first since P6) and two `SKILL.md` passages
+  describing the pre-stage-2 existence-fallback algorithm.
+
+### 📚 Documentation
+
+- docs(store-spec): the top Status box, §6 row 2, and §9.4 now describe the
+  anchor-gated stage-2 rule instead of the P1-era existence fallback. First
+  cross-check (against the other five harnesses' own `*_paths.py`
+  docstrings) caught `oms` mid-edit and reported it as still stage 1;
+  re-verified after `oms` landed its own 0.20.0 release in the same window —
+  all six harnesses (`omp` 0.16.0, `oms` 0.20.0, `omd` 0.11.0, `omx` 0.14.0,
+  `omha` 0.10.0, `omo` 0.8.0) ship stage 2 in this round, confirmed by
+  reading each sibling repo's own source, not by count. §9.4 also now lists
+  which repos have removed their legacy `.gitignore` lines (independently
+  verified per repo, not taken on report) versus what is still outstanding
+  for `--purge` (stage 3, not run anywhere on this machine). §5's "do not
+  remove the legacy lines yet" was correct on 08-27 and was still shipping
+  as of the first draft of this entry — now false with all six harnesses on
+  stage 2, so it is rewritten to describe done (the per-harness lines) vs.
+  outstanding-until-purge (claudebase's and the vault's, which host anchors
+  for multiple harnesses); the "needs approval" framing on the three-repo
+  tracked/ignored boundary shift is likewise resolved to "shipped."
+
 ## [6.7.0] - 2026-02-10
 
 ### 🚀 Features
