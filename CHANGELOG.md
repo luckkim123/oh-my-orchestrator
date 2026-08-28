@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2026-08-28
+
+### Changed
+- `store-spec.md` §9.3 — a note under the `omp` table records that the deferred
+  §4 form conversion **was executed for one tree**: the vault's three anchors
+  (`vault`, `vault-albc`, `vault-krit-simulator`), 16 pages, by hand into
+  `posts/` under the five reader-intent categories. The `community/wiki/` target
+  in the table is unchanged and still correct — `migrate-om-store.sh` moves
+  files and cannot mint the per-page `subject:` the form needs, so conversion is
+  a second manual pass over an already-migrated anchor, not a remapping. The
+  `oms` row already said "same deferral as omp's row above" and inherits the
+  note. Measurements from that pass (field mapping per source form, dropped
+  fields, and why `verified:` cannot be derived from git in a migrated tree) are
+  in the vault harness board's `finding/021`.
+- The status banner's stage-3 paragraph said `--purge` had not run and every
+  legacy store on `ksm-mac` was still on disk. It ran on 2026-08-28 — 20 stores
+  deleted, `census` reports `in scope: 0`. The plugin-cache precondition the
+  paragraph named did hold and is kept; the per-anchor decision now reads as
+  what it is on *other* machines.
+
 ## [0.8.0] - 2026-08-28
 
 > This is the first `0.x` entry in this file — recent `0.4.0`–`0.7.2` plugin

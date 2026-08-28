@@ -21,12 +21,13 @@ stated otherwise.
 > table below (§6) describes the stage-2 rule; §9.1 tracks per-anchor
 > file-migration progress.
 >
-> Stage 3 (`--purge`) has **not** run. Every legacy store on `ksm-mac` is still
-> on disk, and each harness's release only stops *reading* it. Deleting them is
-> a separate per-anchor decision, and one more thing has to happen first: hooks
-> execute from `~/.claude/plugins/cache/`, not from these repos, so a pushed
-> release changes nothing about what a session is told until that cache picks
-> up the new version.
+> Stage 3 (`--purge`) **ran on `ksm-mac`, 2026-08-28** — 20 legacy stores
+> deleted, `migrate-om-store.sh census` now reports `in scope: 0`. The
+> precondition held: hooks execute from `~/.claude/plugins/cache/`, not from
+> these repos, so the six plugin caches had to be updated (and the session
+> restarted) before a pushed release changed what any session was told. Purge
+> stays a per-anchor decision on every other machine, where the legacy stores
+> are still on disk and each harness's release only stops *reading* them.
 
 ---
 
@@ -528,6 +529,17 @@ read-path updates.
 | `state/verify-throttle.json` | `runtime/project/` | ⑤ — `detrack` approval item |
 | `work/{audits,plans,scans,tmp,versions}/` | `work/project/` | ④ |
 | `.DS_Store` | **not moved** | not ours |
+
+> **The deferred form was converted for one tree on 2026-08-28** — the vault's
+> three anchors (`vault`, `vault-albc`, `vault-krit-simulator`), 16 pages, by
+> hand into `posts/` under the five reader-intent categories. **The `wiki/`
+> target above still stands**: a store that has not migrated yet still lands in
+> `community/wiki/`, because `migrate-om-store.sh` moves files and cannot mint
+> the per-page `subject:` the §4 form needs. The conversion is a second, manual
+> pass over an already-migrated anchor, not a change to this mapping. What that
+> pass measured — the field mapping per source form, the fields dropped, and why
+> `verified:` cannot be derived from git in a tree that has been migrated — is in
+> the vault harness board's `finding/021`.
 
 `oms` store:
 
