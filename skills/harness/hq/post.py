@@ -32,7 +32,10 @@ TOPICS = (
     "architecture", "decision", "pattern", "debugging", "environment",
     "reference", "convention", "session-log",
 )
-CONFIDENCES = ("high", "medium", "low")
+# "none" is not an assessment, it is the explicit absence of one — the same
+# idiom `status:`/`supersedes:` already use. Added 2026-08-29 so a pre-schema
+# post can satisfy the schema without anyone inventing a confidence for it.
+CONFIDENCES = ("high", "medium", "low", "none")
 STATUSES = ("none", "needs-experiment", "needs-apply-before-retrain", "resolved")
 
 # Keys whose value runs to the end of its bullet line, ' · ' separators and all.
@@ -54,6 +57,9 @@ class Post:
                              # continuation lines kept verbatim, joined with "\n")
     raw_prefix_lines: Optional[list] = None   # see module docstring
     has_comments_section: bool = False
+    comments_lead_blank: bool = False   # a blank line between the marker and
+                                        # the first comment; 12 live posts have
+                                        # one and dropping it broke round-trip
 
     @property
     def id(self) -> str:
@@ -189,10 +195,18 @@ def parse_post(path: Path, raw: str) -> Post:
             comments_idx = k
             break
 
+    comments_lead_blank = False
     if comments_idx is not None:
         body_lines = remainder[:comments_idx]
         comment_lines = remainder[comments_idx + 1:]
         has_comments_section = True
+        # A blank line directly under "## Comments" is a real authoring choice in
+        # this store (12 posts), not noise. It has to survive serialize or every
+        # `hq comment`/`hq edit` on those posts silently reflows the file.
+        if comment_lines and comment_lines[0] == "" and any(
+                l.startswith("- ") for l in comment_lines):
+            comments_lead_blank = True
+            comment_lines = comment_lines[1:]
     else:
         body_lines = remainder
         comment_lines = []
@@ -223,12 +237,13 @@ def parse_post(path: Path, raw: str) -> Post:
         comments=comments,
         raw_prefix_lines=lines[0:fm_end],
         has_comments_section=has_comments_section,
+        comments_lead_blank=comments_lead_blank,
     )
 
 
 _TEMPLATE_LINES = [
     ("id", "date", "author"),
-    ("harness", "to"),
+    ("project", "harness", "to"),
     ("subject", "supersedes"),
     ("topic",),
     ("confidence", "status"),
@@ -266,6 +281,8 @@ def serialize_post(post: Post) -> str:
 
     if post.has_comments_section:
         lines.append(_COMMENTS_MARKER)
+        if post.comments_lead_blank:
+            lines.append("")
         for entry in post.comments:
             entry_lines = entry.split("\n")
             lines.append("- " + entry_lines[0])

@@ -23,8 +23,13 @@ from hq.anchor import (  # noqa: E402
     GATE_CORRUPT, GATE_LEGACY, GATE_NORMAL, GATE_OFF, HqError,
 )
 
-VAULT_POSTS = Path.home() / "ksm_Obsidian" / "1_Area" / "harness" / ".orchestration" / "posts"
-CLAUDEBASE_POSTS = Path.home() / "claudebase" / ".orchestration" / "posts"
+# Live stores, used by RoundTripTest. These paths have moved twice and the test
+# skips silently when they are wrong, so a stale literal here buys nothing but a
+# green run: `.community/` -> `.orchestration/` -> `.hq/community/` (store-spec
+# §3), and on 2026-08-29 the vault's three boards merged into its root anchor
+# (D29), so the vault's posts are no longer under `1_Area/harness/`.
+VAULT_POSTS = Path.home() / "ksm_Obsidian" / ".hq" / "community" / "posts"
+CLAUDEBASE_POSTS = Path.home() / "claudebase" / ".hq" / "community" / "posts"
 
 
 def _tree_hash(root: Path) -> str:
@@ -415,6 +420,56 @@ class CliSmokeTest(unittest.TestCase):
                 capture_output=True, text=True, timeout=10,
             )
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+
+class ProjectFieldTest(unittest.TestCase):
+    """D29 (2026-08-29): one `.hq` per repo, so the axis that used to be the
+    anchor directory is now the `project:` field. These three checks are what
+    make that substitution actually work rather than merely be declared."""
+
+    def test_query_filters_by_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "one-repo")
+            _write_post(root, "finding", 1, title="A",
+                        extra_bullets="- project: alpha · harness: omo · to: all\n")
+            _write_post(root, "finding", 2, title="B",
+                        extra_bullets="- project: beta · harness: omo · to: all\n")
+            ids = lambda **kw: sorted(p["id"] for p in verbs.query(root, **kw)["posts"])
+            self.assertEqual(ids(project="alpha"), ["finding/001"])
+            self.assertEqual(ids(project="beta"), ["finding/002"])
+            # no argument returns everything -- the default has to stay "all",
+            # because the failure this merge fixed was records being invisible.
+            self.assertEqual(ids(), ["finding/001", "finding/002"])
+
+    def test_project_and_harness_are_independent_axes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "one-repo")
+            _write_post(root, "finding", 1, title="A",
+                        extra_bullets="- project: alpha · harness: omx · to: all\n")
+            _write_post(root, "finding", 2, title="B",
+                        extra_bullets="- project: alpha · harness: omo · to: all\n")
+            got = sorted(p["id"] for p in
+                         verbs.query(root, project="alpha", harness="omo")["posts"])
+            self.assertEqual(got, ["finding/002"])
+
+    def test_confidence_none_is_accepted(self):
+        """A pre-schema post has no confidence to recover. `none` lets it satisfy
+        the schema without anyone inventing one -- the same idiom `status:` uses."""
+        self.assertIn("none", post.CONFIDENCES)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "one-repo")
+            res = verbs.post_new(
+                root, category="finding", title="T", author="test", summary="s",
+                body="b", confidence="none", project="alpha", now="2026-08-29",
+            )
+            written = (root / ".hq/community/posts/finding/001-t.md").read_text("utf-8")
+            self.assertIn("confidence: none", written)
+            self.assertIn("project: alpha", written)
+            self.assertEqual(res["id"], "finding/001")
+            self.assertEqual(verbs.lint(root)["errors"], [])
 
 
 if __name__ == "__main__":

@@ -53,25 +53,44 @@ outer anchor (global) — the local-to-global *ascent* pattern `oms` already use
 
 ### Granularity — which directory gets the anchor
 
-> **The anchor sits at the root of the project that owns the work. In a repo holding
-> several independent projects, that is the project's folder, not the repo root.**
+> **One anchor per git repository, at its root.** A repo holding several independent
+> projects still gets exactly one `.hq/`. The projects are told apart *inside* the
+> store, by the `project:` field (§4), never by a second anchor.
 
-This is the rule `campaign-protocol.md` §Layout used to state for `.orchestration/`, and
-it is unchanged. What ascent adds is that the outer level is no longer wrong — a repo
-root may *also* carry an anchor, for records that outlive any one project, and a query
-from inside a project resolves the inner one first while still surfacing the outer as a
-shadowed canonical (§4).
+**This reverses the rule this section carried until 2026-08-29**, which put the anchor
+at each project's folder and called nesting legitimate. The reversal is a user decision
+and its argument is this repo's own case law: a capability nobody invokes is
+indistinguishable from one that does not exist (`tokensave`, 6 MCP calls against 10,813
+tool calls in 22 days; `graphify`'s MCP server, 0 calls in 30). Cross-anchor lookup was
+in that class — `hq query` implemented ascent on the `--subject` path only, so every
+other path answered from `roots[0]` and each board saw only itself. Measured on the
+vault the day of the decision: three sibling anchors, `0` citations had ever crossed
+one. And ascent could not have fixed it, because ascent only walks *up*: two sibling
+projects in one repo are invisible to each other by construction, no matter how much of
+the ascent machinery is finished.
 
-Two consequences worth stating, because both were failure modes under the old
-one-store-per-project rule:
+What replaces the directory axis:
 
-- **Post ids never collide across anchors.** Numbering is per anchor and citations that
-  cross a boundary are namespaced (§4). Two projects each numbering their own
-  `finding/001` merge without renumbering — which is what made the old rule forbid
-  a shared root in the first place.
-- **Nesting is legitimate, not a mistake to clean up.** `workspace` already runs a
-  three-deep chain. Ascent is defined for it; anchor-id uniqueness is what keeps it
-  unambiguous.
+- **Post ids are anchor-global and monotonic** (§4). Merging two boards therefore
+  renumbers one of them. Renumber the side with fewer inbound references and rewrite
+  those references in the same commit — and note that a bare `<category>/<NNN>` means
+  whichever board its *source file* belongs to, so a repo-wide search-and-replace
+  corrupts the side that kept its numbers.
+- **`project:` and `harness:` are the two axes**, both fields, both queryable
+  (`hq query --project`, `--harness`). Neither is a directory.
+- **An outer anchor is still resolved by ascent**, and that is now strictly a
+  cross-*repository* mechanism: a repo nested inside another repo's tree keeps its own
+  anchor, because its records must travel with its own history.
+
+Unmigrated: **`workspace` still runs a three-deep chain** (`workspace/.oms`,
+`12_Masters_Thesis/.oms`, `03_thesis/paper/.oms`). It is debt against this rule, not an
+exception to it — the user deferred it ("workspace는 나중에 할거", 2026-08-29), and it is
+not a git repository, so the merge procedure above does not transfer unchanged. Do not
+cite it as precedent for a new nested anchor.
+
+One thing the old rule got right and this one keeps: anchor-id uniqueness within a
+machine, and namespaced citations (`<anchor-id>:<category>/<NNN>`) for the cross-repo
+case (§4).
 
 Verify the tracked layers are not ignored before trusting an anchor:
 
@@ -218,10 +237,10 @@ rename or delete.
 ```markdown
 # <title>
 - id: <category>/<NNN> · date: YYYY-MM-DD · author: <session-or-agent>
-- harness: <omp|oms|omd|omx|omha|omo|none> · to: <name|all>
+- project: <slug> · harness: <omp|oms|omd|omx|omha|omo|none> · to: <name|all>
 - subject: <kebab-slug> · supersedes: <category>/<NNN>|none
 - topic: <architecture|decision|pattern|debugging|environment|reference|convention|session-log>
-- confidence: <high|medium|low> · status: <none|needs-experiment|needs-apply-before-retrain|resolved>
+- confidence: <high|medium|low|none> · status: <none|needs-experiment|needs-apply-before-retrain|resolved>
 - verified: YYYY-MM-DD (against <version|commit>) · keywords: <3-6>
 - summary: <one line — others decide from this alone whether to open it>
 
@@ -230,6 +249,16 @@ rename or delete.
 ## Comments
 - (YYYY-MM-DD, <name>) <content>          ← append-only
 ```
+
+`project:` is the axis that used to be the anchor directory (§2, 2026-08-29). It is
+required on any post in a repo that holds more than one project; a single-project repo
+may omit it. `harness:` is the second, independent axis — a project's records can come
+from several harnesses and a harness writes into several projects.
+
+`confidence: none` is not an assessment; it is the explicit absence of one, the same way
+`status: none` and `supersedes: none` read. It exists so a pre-schema post can satisfy
+the schema without anyone inventing a confidence it never had. Never use it for a post
+whose author *did* judge — write what they judged.
 
 Fields carried over unchanged from the old convention: `id`, `date`, `author`, `to`,
 `keywords`, `summary`, the append-only `## Comments` block, and **cite symbols, not line
@@ -423,6 +452,13 @@ consider the source — which under §7 stays put until `--purge` anyway.
 ---
 
 ## 9. The full mapping table
+
+> **The anchor column below is a 2026-08-27 snapshot and four of its rows no longer
+> exist.** On 2026-08-29 the vault's four anchors (`vault`, `vault-albc`,
+> `vault-harness`, `vault-krit-simulator`) merged into one at the repo root under the
+> revised §2 rule; 114 posts were renumbered into a single monotonic sequence. The
+> per-file *layer* assignments in this section are unaffected — they say which of the
+> four layers a file belongs to, not which anchor owns it.
 
 Census command (the fixed one — **unbounded depth**; a `-maxdepth 6` variant missed
 three real anchors at depths 7–8):

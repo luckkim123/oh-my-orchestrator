@@ -69,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     post_p.add_argument("--summary", required=True)
     post_p.add_argument("--body-file", required=True, help="path, or '-' for stdin")
     post_p.add_argument("--harness", default="omo")
+    post_p.add_argument("--project", default=None)
     post_p.add_argument("--to", default="all")
     post_p.add_argument("--subject", default=None)
     post_p.add_argument("--supersedes", default=None)
@@ -94,6 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
     query_p.add_argument("--post-id", default=None)
     query_p.add_argument("--keyword", default=None)
     query_p.add_argument("--harness", default=None)
+    query_p.add_argument("--project", default=None)
     query_p.add_argument("--topic", default=None)
     query_p.add_argument("--status", default=None)
 
@@ -129,6 +131,7 @@ def main(argv=None) -> int:
             result = verbs.post_new(
                 root, category=args.category, title=args.title, author=args.author,
                 summary=args.summary, body=body, harness=args.harness, to=args.to,
+                project=args.project,
                 subject=args.subject, supersedes=args.supersedes, topic=args.topic,
                 confidence=args.confidence, status=args.status, verified=args.verified,
                 keywords=keywords, now=_now_date(),
@@ -159,6 +162,7 @@ def main(argv=None) -> int:
             result = verbs.query(
                 start, subject=args.subject, post_id=args.post_id, keyword=args.keyword,
                 harness=args.harness, topic=args.topic, status=args.status,
+                project=args.project,
             )
             _print(result, args.json)
             return 0

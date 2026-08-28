@@ -2,6 +2,72 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-08-29
+
+### Changed
+- **`store-spec.md` §2 reverses its own granularity rule.** It said the anchor
+  belongs at "the project's folder, not the repo root" and defended nesting
+  outright — *"Nesting is legitimate, not a mistake to clean up."* It now says
+  **one anchor per git repository, at its root**, with projects separated by the
+  `project:` field. The old argument was internally sound (ascent shadows an
+  inner store unambiguously; per-anchor numbering avoids id collisions) and
+  still beside the point: **ascent only walks up**, so two sibling projects in
+  one repo are invisible to each other by construction. Measured on `ksm-mac`
+  the day of the decision — four sibling anchors in one repo, 114 posts,
+  **zero** citations had ever crossed an anchor. That is the same shape as the
+  two capabilities this ecosystem already retired for going unrouted
+  (`tokensave` 6 calls / 10,813; `graphify`'s MCP server 0 / 30 days), and an
+  option flag is not an answer to it. `workspace`'s three-deep chain is now
+  recorded as **debt against the rule, not an exception to it** — the user
+  deferred it, and it is not a git repository, so the merge procedure does not
+  transfer unchanged.
+- `campaign-protocol.md` restated the old rule in its pointer to §2; corrected
+  in the same pass rather than left to drift.
+- `store-spec.md` §9's mapping table carries a banner: its anchor column is a
+  2026-08-27 snapshot and four of its rows no longer exist. The per-file *layer*
+  assignments are unaffected — they say which layer a file belongs to, not which
+  anchor owns it.
+
+### Added
+- **`project:` in the §4 post schema**, and `hq query --project` / `hq post
+  --project` to write and read it. `project:` and `harness:` are two independent
+  axes; with no filter, `query` still returns everything, because invisibility
+  was the failure the §2 change fixed.
+- **`confidence: none`.** The value set was `high|medium|low`, which left no way
+  to say "this post predates the field" — the only honest options were to
+  fabricate a confidence or to leave the post permanently `legacy-schema`.
+  `none` is the absence of an assessment, the same way `status: none` and
+  `supersedes: none` already read. Do not use it for a post whose author did judge.
+- `agy` backend (D24), from the previous session's `3e3aa78`: the registry is now
+  `codex` · `claude` · `agy`. `gemini.go` and `opencode.go` are unregistered, not
+  deleted — the user retired both (gemini CLI no longer authenticates on this
+  machine; opencode unused), and agy is gemini's successor. Deleting the code is
+  a separate ~80-line pass through parser, filter, and tests.
+
+### Fixed
+- **Round-trip lost a blank line under `## Comments`.** 12 live posts write one
+  there; the parser dropped it and `serialize_post` never put it back, so any
+  `hq comment` or `hq edit` on those posts silently reflowed the file. Now
+  captured per post (`Post.comments_lead_blank`) and echoed back.
+- **`test_hq.py`'s live-store paths were two moves stale** (`.orchestration/`,
+  and the vault board's pre-merge location), and `RoundTripTest` skips silently
+  when a path is wrong — so both of its cases had been passing by not running.
+  Fixing the paths made the blank-line bug above visible immediately. Suite: 144
+  passed, 0 skipped (was 139 + 2 skipped).
+
+### Verification
+- `python3.12 -m pytest skills/harness/tests/ -q` -> **144 passed, 0 skipped**.
+- `go test ./...` in `codeagent-wrapper/` -> 19 packages ok.
+- Applied end-to-end on the vault: four anchors merged into one, 114 posts,
+  `hq index` errors 0, `hq lint` clean (WARN 0 including legacy-schema),
+  `hq query --project` returns 77 / 30 / 5 / 2 and no filter returns 114.
+
+### Notes
+- The vault's own migration record — the renumbering map, the reference-rewrite
+  traps, and the `config/project/` collision that has no field-based answer — is
+  in that store's `handoff/107`, not here. This repo owns the spec; the project
+  owns its own history.
+
 ## [0.8.1] - 2026-08-28
 
 ### Changed

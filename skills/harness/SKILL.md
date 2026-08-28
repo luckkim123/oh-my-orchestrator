@@ -39,10 +39,10 @@ global flags `--anchor`, `--json`, and `--version` come *before* the verb.
 
 | Verb | What it does |
 |:---|:---|
-| `hq post --category C --title T --author A --summary S --body-file F` | Create a post. The number is assigned tree-globally, so `finding/007` is followed by `decision/008`. Optional: `--subject` `--supersedes` `--topic` `--confidence` `--status` `--verified` `--keywords` `--to` `--harness` |
+| `hq post --category C --title T --author A --summary S --body-file F` | Create a post. The number is assigned tree-globally, so `finding/007` is followed by `decision/008`. Optional: `--project` `--subject` `--supersedes` `--topic` `--confidence` `--status` `--verified` `--keywords` `--to` `--harness` |
 | `hq comment <post-id> --author A --text T` | Append one comment. Never rewrites an existing line |
 | `hq edit <post-id> --author A --reason R --body-file F` | Replace a post body, recording who and why |
-| `hq query [--subject S] [--post-id ID] [--keyword K] [--harness H] [--topic T] [--status S]` | Read. `--subject` resolves the canonical post for that subject and names the ones it shadows |
+| `hq query [--subject S] [--post-id ID] [--keyword K] [--project P] [--harness H] [--topic T] [--status S]` | Read. `--subject` resolves the canonical post for that subject and names the ones it shadows. `--project` and `--harness` are the two independent axes that replaced per-project anchors (store-spec §2); with no filter the answer is **everything**, because invisibility was the failure that rule fixed |
 | `hq index` | Rewrite `INDEX.md` from the posts on disk |
 | `hq lint` | Schema check across the store. Run before committing |
 | `hq gc [--stale-days N]` | Report-only (default 180 days): posts whose `status: resolved` or `verified:` date has gone stale, and superseded chains. Removes nothing |

@@ -40,8 +40,9 @@ what each layer holds, and which files are tracked are all defined there — thi
 does not restate them, because two documents describing one layout is how the second one
 goes stale.
 
-Read `references/store-spec.md` §2 (the anchor and its granularity, including the
-"the project's folder, not the repo root" rule), §3 (the four layers), and §5
+Read `references/store-spec.md` §2 (the anchor and its granularity — as of
+2026-08-29 that is **one anchor per git repository**, with projects told apart by
+the `project:` field rather than by a second anchor), §3 (the four layers), and §5
 (`.gitignore` plus the `git check-ignore` verification) before laying out a campaign
 store.
 

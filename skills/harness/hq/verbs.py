@@ -83,7 +83,7 @@ def _post_to_dict(p: Post) -> dict:
 
 def post_new(anchor_root, *, category, title, author, summary, body, harness="omo",
              to="all", subject=None, supersedes=None, topic=None, confidence="medium",
-             status="none", verified=None, keywords=(), now):
+             status="none", verified=None, keywords=(), project=None, now):
     if topic is not None and topic not in TOPICS:
         raise HqError(f"unknown topic {topic!r}; expected one of {TOPICS}")
     if confidence not in CONFIDENCES:
@@ -102,6 +102,8 @@ def post_new(anchor_root, *, category, title, author, summary, body, harness="om
         n = next_number(anchor_root)
         post_id = f"{category}/{n:03d}"
         fields = {"id": post_id, "date": now, "author": author, "harness": harness, "to": to}
+        if project is not None:
+            fields["project"] = project
         if subject is not None:
             fields["subject"] = subject
             fields["supersedes"] = supersedes if supersedes is not None else "none"
@@ -166,7 +168,7 @@ def edit(anchor_root, post_id, *, new_body, reason, author, now):
 
 
 def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
-          topic=None, status=None):
+          topic=None, status=None, project=None):
     roots = _resolve_anchor_roots_for_query(start)
 
     if post_id is not None:
@@ -215,6 +217,8 @@ def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
             if keyword.lower() not in hay:
                 return False
         if harness is not None and p.fields.get("harness") != harness:
+            return False
+        if project is not None and p.fields.get("project") != project:
             return False
         if topic is not None and p.fields.get("topic") != topic:
             return False
