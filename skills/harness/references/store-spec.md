@@ -466,6 +466,7 @@ machine that has not seen the release still refuses.
 | `~/.claude/plugins/cache/heroacademia/oh-my-heroacademia/<sha>/.omha` (2) | plugin install cache — a copy of the repo's tracked `redact-patterns.example.txt` |
 | `~/Library/Caches/com.apple.python/**/workspace/.omd` | macOS Python bytecode mirror (`*.pyc` only) |
 | `~/Library/Mobile Documents/.Trash/07_drafts/latex/.oms` | iCloud trash |
+| any store dir inside another store dir (`*/.omp/*`, `*/.oms/*`, `*/.omd/*`, `*/.omx/*`, `*/.omha/*`, `*/.orchestration/*`) | **added P7** — a path within a store, not an anchor. §9.1 row 5's `.omx/.omx` is mapped as a row of row 4's table; listing it separately is a phantom `legacy` anchor no migration can clear |
 
 The two `plugins/cache/**/.omha` entries and the `com.apple.python` mirror were **not in
 the plan's exclusion list** — they surfaced only when the census was re-run at unbounded
@@ -476,10 +477,14 @@ holds one `.omha` per *installed version*, so it grew from 2 to 5 across the P2,
 P4 deployments, and the whole-census total went 29 -> 32 without a single anchor
 changing. `~/.Trash` gains one on any purge. Read a census against the exclusion globs
 (`*/.claude/plugins/*`, `*/Library/Caches/com.apple.python/*`, `*/.Trash/*`,
-`*/.phase0-scratch/*`), never against a remembered number —
+`*/.phase0-scratch/*`, `*/.hq/*`, and the nested-store globs above), never against a
+remembered number —
 `migrate-om-store.sh census` is written that way for this reason. Measured 2026-08-28 on
-`ksm-mac`: 32 hits, 12 excluded, **21 in scope**, which is §9.1's 23 rows minus the two
-that §9.1 itself labels excluded.
+`ksm-mac` **after P7**: 33 hits, 13 excluded, **20 in scope**. The exclusion list grew a
+seventh pattern that round — a store directory nested *inside* another legacy store is a
+path within that store, not an anchor (§9.1 row 5's `.omx/.omx`, mapped as a row of row
+4's table). Before that rule census reported 21 in scope, and the extra row was a phantom
+`legacy` anchor no migration could ever clear.
 
 **Verified: `omha` does not read either cache.** `route_log.py:10` documents opt-in "by
 directory: writes only when `.omha/` already exists in the session's cwd", and
@@ -568,6 +573,7 @@ gate", and that deferral was the assignment):
 | `state.json` | `runtime/experiments/state.json` | ③⑤ tie, ⑤ wins — same call as omo's `board.json` |
 | `state/produced-reports.jsonl` | `config/experiments/produced-reports.jsonl` | ⑤(b) fails — a gate ledger, loss costs a re-stamp |
 | `scratch/<session_id>/` | `runtime/experiments/scratch/<session_id>/` | ⑤ — session-bound by construction |
+| `.trash/` | `runtime/experiments/trash/` | ⑤ — `omx clean`'s holding area. **Absent from every censused store**; surfaced by the P7 prose audit, which found `clean.py` resolving it as `paths.omx_dir / ".trash"` unconditionally. It has to move: left at the legacy path, the first `omx clean` after a `--purge` recreates `.omx/` and undoes the purge |
 | `runs/<run_id>/` · `campaigns/<id>/` | `work/experiments/{runs,campaigns}/` | ④ — **whole, not split.** No censused store has either directory, so a per-file split inside them would be invented rather than measured; deferred the way omp's `env/` and omd's `wiki/` were |
 | `.omx/` (the nested self-directory, §9.1 row 5) | `runtime/experiments/nested-omx/` | one real file, a wiki log written by a misrooted `--root .../.omx` call. Mapped rather than skipped (skipping loses it at `--purge`) and rather than made its own anchor (§2's granularity rule does not describe an anchor inside another store) |
 
