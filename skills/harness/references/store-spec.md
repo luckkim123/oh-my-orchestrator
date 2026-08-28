@@ -368,8 +368,14 @@ Cutover per harness runs in three stages:
 3. **Purge.** The legacy store is deleted.
 
 **Moves are two-step: copy, then verify. The legacy store is not deleted, trashed, or
-`git rm`-ed at move time.** Deletion is a separate `migrate-hq.sh --purge` subcommand
+`git rm`-ed at move time.** Deletion is a separate `migrate-om-store.sh purge` subcommand
 that runs only after stage 2, per anchor.
+
+The tool is `claudebase` `runtime/bin/migrate-om-store.sh` (P5, 2026-08-28) — dry-run by
+default, `apply` copies and sha256-verifies without deleting, `reverse` merges new-store
+writes back to the legacy path, and `purge` reads its confirmation from `/dev/tty` so a
+piped or closed stdin refuses. §9.3 below is its mapping table; a path no row claims
+exits 2 rather than being skipped.
 
 **The decision to advance an anchor past stage 1 belongs to the user, not to a script.**
 `migrated.jsonl` is union-merged, so a missing row is indistinguishable from an unpushed
@@ -447,7 +453,7 @@ Rows 4–6 (`albc`) are **not inspected**. An active RA-L campaign holds them, a
 campaign closes. They are listed so the census set matches `find`; their per-file layer
 assignment is deferred to P7 by design, and that deferral is the assignment.
 
-### 9.2 Excluded — 6, with the reason each is not an anchor
+### 9.2 Excluded — by pattern, not by count
 
 | Path | Why excluded |
 |:---|:---|
@@ -461,6 +467,16 @@ assignment is deferred to P7 by design, and that deferral is the assignment.
 The two `plugins/cache/**/.omha` entries and the `com.apple.python` mirror were **not in
 the plan's exclusion list** — they surfaced only when the census was re-run at unbounded
 depth for this spec.
+
+**The counts in this table are a snapshot; the patterns are the rule.** The plugin cache
+holds one `.omha` per *installed version*, so it grew from 2 to 5 across the P2, P3 and
+P4 deployments, and the whole-census total went 29 -> 32 without a single anchor
+changing. `~/.Trash` gains one on any purge. Read a census against the exclusion globs
+(`*/.claude/plugins/*`, `*/Library/Caches/com.apple.python/*`, `*/.Trash/*`,
+`*/.phase0-scratch/*`), never against a remembered number —
+`migrate-om-store.sh census` is written that way for this reason. Measured 2026-08-28 on
+`ksm-mac`: 32 hits, 12 excluded, **21 in scope**, which is §9.1's 23 rows minus the two
+that §9.1 itself labels excluded.
 
 **Verified: `omha` does not read either cache.** `route_log.py:10` documents opt-in "by
 directory: writes only when `.omha/` already exists in the session's cwd", and
@@ -479,9 +495,10 @@ read-path updates.
 | `STRUCTURE.md` · `DATASETS.md` | `config/project/` | ②③ tie, ③ wins (`omp_content_audit.py:113`) |
 | `learned.md` | `config/project/` | ③ (`omp_content_audit.py:201`) |
 | `PROJECT.md` · `NAMING.md` · `CONVENTIONS.md` | `community/` | ② — prompt strings only, no parser |
-| `wiki/*.md` | `community/posts/` | ② — converted, slug becomes `subject:` |
+| `wiki/*.md` | `community/wiki/` | ② — **P3 shipped `wiki/`, not `posts/`**: the `posts/` target assumes the §4 conversion (per-page `subject:`), which is a P6 item. The layer moved now; the form is deferred |
 | `secretary/ledger.jsonl` | `config/project/` | ⑤(b) fails — it is the history |
 | `secretary/journal/` · `BRIEF.md` · `raid.md` · `todo.txt` · `done.txt` | **community candidate — P6 approval item** | ② by rule; the transition needs a `chronicler` hook revision, so the choice is preserved rather than forced |
+| `env/` | `config/project/` | ③ — the `omp-env` canonical Dockerfile/compose assets (**added P5**: absent from this table until `krit/simulator`'s 7 files were censused) |
 | `garden-state.json` | `runtime/project/` | ⑤ — `detrack` approval item |
 | `state/verify-throttle.json` | `runtime/project/` | ⑤ — `detrack` approval item |
 | `work/{audits,plans,scans,tmp,versions}/` | `work/project/` | ④ |
@@ -495,7 +512,7 @@ read-path updates.
 | `venues/*.yaml` | `config/scholar/` | ③ |
 | `workflows/*.js` | `config/scholar/` | ③ — executed by a verb |
 | `state/verified-citations.json` | `config/scholar/` | ⑤(b) fails — **stays tracked**, approval item |
-| `wiki/{convention,decision,pattern,reference,history}/` · `INDEX.md` · `README.md` | `community/posts/` | ② — converted |
+| `wiki/{convention,decision,pattern,reference,history}/` · `wiki/INDEX.md` · `wiki/README.md` | `community/wiki/` | ② — same deferral as omp's row above; `INDEX.md`/`README.md` live *inside* `wiki/`, not at the store root (measured, workspace `.oms`) |
 | `<slug>/{versions,renders,research,outline,figure_survey,tmp,gen-image,methodology}/` | `work/scholar/<slug>/` | ④ |
 | `<slug>/*.md` skeletons · `PATHS.md` · `*_PROMPT.md` · `DECISIONS_NEEDED.md` | `work/scholar/<slug>/` | ④ — per-run scaffolding |
 | `_backport-design/` | `community/` | ② |
@@ -508,6 +525,7 @@ read-path updates.
 | `<slug>/{build,renders,versions,assets,verify-runs,archive_*}/` | `work/docs/<slug>/` | ④ |
 | `<slug>/{OUTLINE,SCRIPT,SPEAKER_NOTES,RESUME,RESTART_PROMPT,build-notes}.md` | `work/docs/<slug>/` | ④ |
 | `<slug>/spec/` | `work/docs/<slug>/` | ④ |
+| `wiki/{convention,pattern,technique}/` | `community/wiki/` | ② — **added P5**: absent from this table until workspace's `.omd` was censused |
 | `.hook-throttle.json` | `runtime/docs/` | ⑤ |
 | `HANDOFF_omd_audit.md` | `community/posts/` | ② — becomes a `handoff/` post |
 
@@ -523,8 +541,9 @@ read-path updates.
 
 | Path | Layer | Rule |
 |:---|:---|:---|
-| `HUB.md` · `posts/` · `agents/` · `sessions/` · `rules/` | `community/` | ② — ids unchanged |
-| `knowledge/{libraries,research}/` | `community/posts/` | ② — absorbed (§4) |
+| `HUB.md` · `INDEX.md` · `posts/` · `agents/` · `sessions/` · `rules/` | `community/` | ② — ids unchanged. **`INDEX.md` added P5**: both live boards carry one |
+| `knowledge/{libraries,research}/` | `community/knowledge/` | ② — absorption into `posts/` (§4) is the P6 *form* change, same deferral as `wiki/`. Merging into `posts/` now would also make the reverse mapping ambiguous |
+| `.hq-lock` | **not moved** | `hq`'s write lock (`hq/store.py:156`), recreated on demand (**added P5**) |
 | `board.json` | `runtime/` | ③⑤ tie, ⑤ wins |
 | `harness-progress.txt` | `runtime/` | ⑤ — **kept**, see §11 |
 | `.omc/logs/` | **not moved** | third-party (`OMC_STATE_DIR`), out of scope |
@@ -548,7 +567,7 @@ fallback-removal release.
 | `oh-my-project` | `.sp/` · `.omp-buildout.workflow.js` | no own store; two new lines only |
 | `oh-my-orchestrator` | `.omc/` | no own store; two new lines only |
 
-### 9.5 The root string is declared in six places
+### 9.5 The root string is declared in seven places
 
 Renaming `.hq` later costs five releases plus a `claudebase` sync. The declarations:
 
@@ -556,6 +575,7 @@ Renaming `.hq` later costs five releases plus a `claudebase` sync. The declarati
 |:---|:---|:---|
 | 1–5 | `omp` · `oms` · `omd` · `omx` · `omha` paths module (one each) | the literal, plus a re-entry lint |
 | 6 | `claudebase` `config/settings.json:4` `GATEGUARD_EXEMPT_GLOBS` | deployed to `~/.claude/settings.json` |
+| 7 | `claudebase` `runtime/bin/migrate-om-store.sh` `HQ=` | the migration tool; a `claudebase` sync, not a release |
 
 Number 6 is not optional and not late. Its matcher is `Edit|Write|MultiEdit|Bash`, so
 **without the exemption the very first write to a `.hq/` path is refused by gateguard's
@@ -607,5 +627,8 @@ hold).
 
 **Spec owner**: `oh-my-orchestrator` — `skills/harness/references/store-spec.md`
 **Frozen**: 2026-08-27 (Phase 0)
+**Amended**: 2026-08-28 (P5) — §7 names the shipped tool · §9.2 is patterns, not a count ·
+§9.3 gains `omp env/`, `omd wiki/`, `omo INDEX.md`/`.hq-lock`, and corrects the `wiki/` and
+`knowledge/` targets to what P3 shipped · §9.5 counts the tool as a seventh declaration site
 **Supersedes**: `campaign-protocol.md` §Layout and its owning-store table ·
 `omo/references/shared-context.md` §Layout — those sections now point here.
