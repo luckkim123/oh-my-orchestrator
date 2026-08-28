@@ -125,7 +125,7 @@ pushed yet". Nothing may automate a quorum judgment off this file; see §7.
 │   ├── migrated.jsonl
 │   └── project/  scholar/  docs/  experiments/  routing/
 ├── work/                 [ignored]   regenerable artifacts
-│   └── project/  docs/<slug>/  scholar/<slug>/  experiments/{runs,programs,campaigns}/
+│   └── project/  docs/<slug>/  scholar/<slug>/  experiments/{runs,campaigns}/
 └── runtime/              [ignored]   session state, locks, logs, sensitive files
     ├── board.json
     └── project/  scholar/  docs/  experiments/  routing/
@@ -427,9 +427,9 @@ independent detectors.
 | 1 | `ksm_Obsidian/.omp` | omp | 67 | vault git | **P3 pilot** |
 | 2 | `ksm_Obsidian/.oms` | oms | 1 | vault git | P4 |
 | 3 | `ksm_Obsidian/.omha` | omha | 1 | vault git (ignored) | P4 |
-| 4 | `ksm_Obsidian/0_Project/in_progress/albc/.omx` | omx | — | vault git | **P7 — gated** |
-| 5 | `ksm_Obsidian/0_Project/in_progress/albc/.omx/.omx` | omx | — | vault git | **P7 — gated** |
-| 6 | `ksm_Obsidian/0_Project/in_progress/albc/.orchestration` | omo | — | vault git | **P7 — gated** |
+| 4 | `ksm_Obsidian/0_Project/in_progress/albc/.omx` | omx | 15 | vault git | P7 |
+| 5 | `ksm_Obsidian/0_Project/in_progress/albc/.omx/.omx` | omx | 1 | vault git | P7 — mapped as a row of row 4's store, not its own anchor |
+| 6 | `ksm_Obsidian/0_Project/in_progress/albc/.orchestration` | omo | 119 | vault git | P7 |
 | 7 | `ksm_Obsidian/0_Project/in_progress/krit/simulator/.omp` | omp | 18 | vault git | P6 |
 | 8 | `ksm_Obsidian/1_Area/harness/.orchestration` | omo | 16 | vault git | P6 |
 | 9 | `Desktop/workspace/.omd` | omd | 871 | **no git** | P6 |
@@ -448,10 +448,13 @@ independent detectors.
 | 22 | `oh-my-orchestrator/.phase0-scratch/test-e2e-precompact/.orchestration` | omo | — | git | **excluded — scratch** |
 | 23 | `oh-my-orchestrator/.phase0-scratch/test-live/.orchestration` | omo | — | git | **excluded — scratch** |
 
-Rows 4–6 (`albc`) are **not inspected**. An active RA-L campaign holds them, a
-`session-gate` hook blocks the path, and HUB decision D2 defers the merge until the
-campaign closes. They are listed so the census set matches `find`; their per-file layer
-assignment is deferred to P7 by design, and that deferral is the assignment.
+Rows 4–6 (`albc`) were **not inspected** until P7: an active RA-L campaign held them, a
+`session-gate` hook blocked the path, and HUB decision D2 deferred the merge. **D2 was
+released 2026-08-28 (HUB D20)** and P7 migrated all three — anchor id `vault-albc`, 125
+files copied, sha256 verified. The `session-gate` hook was satisfied through its own
+designed path (a `Read` of the three declared documents), not bypassed. The migration
+tool's `is_gated()` was kept rather than deleted and bound to `HQ_D2_RELEASED=1`, so a
+machine that has not seen the release still refuses.
 
 ### 9.2 Excluded — by pattern, not by count
 
@@ -549,8 +552,24 @@ read-path updates.
 | `harness-progress.txt` | `runtime/` | ⑤ — **kept**, see §11 |
 | `.omc/logs/` | **not moved** | third-party (`OMC_STATE_DIR`), out of scope |
 
-`omx` store: **deferred to P7 by the campaign gate.** No per-file rows here; that
-deferral is this table's assignment for rows 4–6.
+`omx` store (**added P7** — until then this row read "deferred to P7 by the campaign
+gate", and that deferral was the assignment):
+
+| Path | Layer | Rule |
+|:---|:---|:---|
+| `profile/*` | `config/experiments/profile/` | ③ — `evaluator.sh`, `metrics.yaml`, `rules.md`, `launch.sh`, `seal.json`, `tree.yaml`; hand-tuned and read by verbs |
+| `programs/<id>/program.json` | `config/experiments/programs/<id>/` | ③ — `campaign.py:305,346` reads it |
+| `programs/<id>/PLAN.md` · `HANDOFF.md` | `community/programs/<id>/` | ② — templates seed them, humans write them; `campaign.py:360` only tests `.is_file()`. **The directory is split per file**, which is why §3's tree no longer lists `programs/` under `work/`: `**/.hq/work/` is gitignored, so sending the bundle whole would have untracked albc's plan of record (`finding/018`) |
+| `registry/findings/*.md` | `community/wiki/` | ② — same class as omp's, oms's and omd's `wiki/`. `omx wiki` lints them, but so does `omp_content_audit.py:152` for omp's; ③ is for content a program consumes as input, not for content a linter audits |
+| `registry/index.md` | `community/wiki/index.md` | ② — derived but tracked, the same call as `community/INDEX.md`. ⚠️ case-collides with an oms `wiki/INDEX.md` in the *same* anchor on a case-insensitive filesystem; no censused anchor holds both, so the rename is deferred rather than guessed |
+| `registry/log.md` | `runtime/experiments/registry/` | ⑤ — chronicles wiki *operations* (`add`, `query`), not the knowledge; the pages are the record. **`detrack` approval item** — albc's is tracked today |
+| `registry/.wiki-lock` · `state/.state-lock` · `runs/<id>/.loop-lock` | **not moved** | mutex files recreated on demand, same call as `.hq-lock` |
+| `recipes/*.md` | `community/recipes/` | ② — promoted diagnostic checklists a human reads before diagnosis |
+| `state.json` | `runtime/experiments/state.json` | ③⑤ tie, ⑤ wins — same call as omo's `board.json` |
+| `state/produced-reports.jsonl` | `config/experiments/produced-reports.jsonl` | ⑤(b) fails — a gate ledger, loss costs a re-stamp |
+| `scratch/<session_id>/` | `runtime/experiments/scratch/<session_id>/` | ⑤ — session-bound by construction |
+| `runs/<run_id>/` · `campaigns/<id>/` | `work/experiments/{runs,campaigns}/` | ④ — **whole, not split.** No censused store has either directory, so a per-file split inside them would be invented rather than measured; deferred the way omp's `env/` and omd's `wiki/` were |
+| `.omx/` (the nested self-directory, §9.1 row 5) | `runtime/experiments/nested-omx/` | one real file, a wiki log written by a misrooted `--root .../.omx` call. Mapped rather than skipped (skipping loses it at `--purge`) and rather than made its own anchor (§2's granularity rule does not describe an anchor inside another store) |
 
 ### 9.4 `.gitignore` amendments per repo
 
