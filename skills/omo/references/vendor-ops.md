@@ -67,7 +67,7 @@ rather than defaulting everything to two hours.
 |:---|:---|:---|
 | `low` | 60s | Mechanical lookups; a question with one right answer |
 | `medium` | 180s | Ordinary consultation -- the default when nothing below applies |
-| `high` | 600s | Architecture review; the two-failure escape (ground 1) |
+| `high` | 600s | Architecture review; the two-failure escape (ground 3) |
 | `xhigh` | 900s | Performance optimization; security audit |
 
 A tier above the task wastes the budget quietly -- the call still returns, just
@@ -106,7 +106,7 @@ lists `claude-sonnet-4-6` and `claude-opus-4-6-thinking` alongside its Gemini mo
 so "codex failed, try antigravity" can route straight back into the same family.
 Check what a backend resolves to before calling it a second opinion.
 
-**This binds ground 3 as well as ground 1, and ground 3 is where it actually bites.**
+**This binds ground 4 as well as ground 3, and ground 4 is where it actually bites.**
 Ground 1 fails loudly -- you already know the approach is stuck. Ground 3 fails
 silently: `oracle` is `claude-opus-5`, so *an Opus 5 session that calls `--agent
 oracle` to review its own work has consulted itself* while believing the rule was

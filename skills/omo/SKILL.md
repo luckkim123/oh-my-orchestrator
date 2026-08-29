@@ -1,52 +1,85 @@
 ---
 name: omo
-description: Use this skill when you see `/omo`. Role-based vendor consultation for code analysis, bug investigation, fix planning, and implementation. Claude Code is the executor; vendor CLIs advise by role. Delegate only on stated grounds.
+description: Use this skill when you see `/omo`. Role-based vendor delegation for code analysis, bug investigation, fix planning, and implementation. Claude decides and judges; vendor CLIs carry the volume — bulk reading and mechanical execution against a settled plan. Delegate on stated grounds, and verify what comes back.
 ---
 
 # omo — Vendor Consultation Orchestrator
 
-**You are the executor.** You read the code, you make the edit, you run the tests.
-`omo` gives you six specialist roles you can consult through vendor CLIs when your
-own pass is not enough. It does not take the work off your hands.
+**You decide and you judge. The volume goes out.** Deciding what to build, whether an
+answer is right, and whether the evidence holds is what a Claude session is worth
+paying for. Sweeping a subsystem to find three files, and typing out a change whose
+design is already settled, are not — they are the same judgment repeated over a lot
+of tokens, and that is what the vendor roles are for.
 
-This inverts upstream `myclaude`, where the session was a dispatcher forbidden to
-touch code. That model spends a round trip on work one edit finishes, and the
-round trip drops the context that made the edit correct.
+This splits roles by strength, the way `cco` does, but along the axis this operator
+built omo for: **cost.** cco puts deep reasoning on codex and bulk reading on Gemini,
+keeping Claude as orchestrator. Here the reasoning stays with Claude and the two
+high-volume halves — reading wide and writing out a decided plan — go to the vendors.
+
+It is not the upstream `myclaude` dispatcher either. That model forbade the session to
+touch code at all, so a one-line fix cost a round trip and lost the context that made
+it correct. The line here is not "who types" but **whether the decision is already
+made**: undecided work stays, decided work goes.
 
 ## Hard Constraints
 
-- **Claude is the default executor.** Do the work yourself unless one of the three
-  grounds below holds. When you delegate, name the ground in the same breath.
+- **Claude owns the decision and the verdict.** What to build, whether it is right,
+  whether the evidence supports the claim — never delegated, never rubber-stamped.
+- **Delegate the volume, on a named ground.** When you delegate, name the ground in
+  the same breath.
+- **What comes back is a draft, not a result.** You read it against the repo before it
+  counts. A vendor that executed a wrong plan does so confidently.
 - **Always pass context forward** — the original user request plus any relevant prior
   output, not just the previous stage's.
 - **Use the fewest agents possible** to satisfy the acceptance criteria. Consulting
-  nobody is a normal outcome.
+  nobody is still a normal outcome for small, decided work — the round trip has a floor
+  and a two-line edit does not clear it.
 
 ### Grounds for delegation (one must hold, and you name it)
 
-1. **3-strike escape** — the same approach has already failed twice. A different
+1. **Settled plan, mechanical execution** — the design is decided and written down, and
+   what is left is typing it out and making the tests pass. The agent's discretion is
+   mechanical, so a cheaper model spends its tokens where they are worth least. Hand it
+   the plan verbatim, not a summary of the plan. → `develop`
+   **The plan has to actually exist.** "I know what I want" is not a settled plan; a
+   spec, a numbered task list, or a design doc is. If you cannot paste it, it is not
+   settled — decide first.
+2. **Volume** — the read (or the write) is larger than the decision it serves:
+   whole-subsystem sweeps, multi-thousand-line surveys, a corpus you would summarize
+   and then discard. → `explore`, which is where a 1M-context backend earns its place.
+3. **3-strike escape** — the same approach has already failed twice. A different
    vendor is a different prior, which is the whole point; a third identical attempt
    from you is not. See `references/oracle.md`.
-2. **Context budget** — the read is large enough to crowd out the work it serves:
-   whole-subsystem sweeps, multi-thousand-line surveys, a corpus you would summarize
-   and then discard.
-3. **Adversarial verification** — the verdict turns on perspective diversity, so it
+4. **Adversarial verification** — the verdict turns on perspective diversity, so it
    has to come from a model that did not author the thing being judged. You cannot
    be both author and approver of the same pass.
 
    **Check the role's model against your own before you call it.** `oracle` is
    `claude-opus-5`; an Opus 5 session that sends its own work to `--agent oracle`
    has consulted itself and gets an approving answer with no error to warn it.
-   Same model as yours, ground 3 is not satisfied — override with `--backend codex`
-   and no `--model`. Details in `references/vendor-ops.md`.
+   Same model as yours, ground 4 is not satisfied — override with `--backend codex`
+   and no `--model`. The wrapper now refuses a cross-vendor override that lands back
+   on your own family, but it cannot catch a role that was already bound there.
+   Details in `references/vendor-ops.md`.
 
 ### Not grounds for delegation
 
-- "It's a code change." You write code.
-- "I should check where this lives." Search it — see the search order below.
-- "A specialist would do it better." Not without one of the three grounds; the
-  round trip costs more than the marginal quality on ordinary work.
-- "The task looks big." Size is not risk. Split it and do the parts.
+- **"The design isn't settled yet."** Then it is not ground 1. A vendor handed an
+  undecided problem returns a confident answer to a question nobody asked, and you pay
+  twice — once for the work and once for reading it to find that out.
+- "It's one edit." The round trip has a floor. A two-line fix you can already see is
+  cheaper to make than to describe.
+- "I should check where this lives." Search it — see the search order below. A single
+  lookup is not volume.
+- "A specialist would do it better." Not by itself; quality without one of the four
+  grounds is the argument that spends the most for the least.
+
+### What this does not buy
+
+Delegating execution does not delete the tokens, it moves the expensive half. You still
+read what comes back — that is the constraint that keeps ground 1 honest and it is not
+free. The saving is real when the vendor writes 400 lines you review; it is negative
+when it writes 4.
 
 ## Search Before Consulting
 
@@ -67,13 +100,14 @@ Routing-first, not an `explore → oracle → develop` conveyor belt.
 
 | Signal | Consult |
 |--------|---------|
+| A written plan whose execution is mechanical (ground 1) | `develop` |
 | Sweep too wide to hold in context (ground 2) | `explore` |
 | External library/API behavior you cannot verify from the repo | `librarian` |
 | Risky change *and* the tradeoff is genuinely open: multi-module, public API, data format, concurrency, security/perf | `oracle` |
-| Two failed attempts at the same fix (ground 1) | `oracle`, then a different vendor for the retry |
-| Authored work that needs a judge who did not write it (ground 3) | `oracle` (review mode) |
+| Two failed attempts at the same fix (ground 3) | `oracle`, then a different vendor for the retry |
+| Authored work that needs a judge who did not write it (ground 4) | `oracle` (review mode) |
 | Trust boundary, authn/authz, secrets, or unsafe defaults touched | `security` |
-| Implementation you have a stated ground to hand off | `develop` / `frontend-ui-ux-engineer` / `document-writer` |
+| Implementation whose design is settled (ground 1) | `develop` / `frontend-ui-ux-engineer` / `document-writer` |
 
 Skip `oracle` when the change is local and low-risk. Line count is a weak signal;
 open tradeoffs are the real gate.
@@ -154,9 +188,9 @@ codeagent-wrapper --agent <agent_name> - <workdir> <<'EOF'
 - Explore output: <...>
 - Librarian output: <...>
 - Oracle output: <...>
-- Prior Attempts: <numbered, with what you observed -- "None" unless ground 1>
+- Prior Attempts: <numbered, with what you observed -- "None" unless ground 3>
 - Known constraints: <tests to run, time budget, repo conventions>
-- Delegation ground: <1 three-strike | 2 context budget | 3 adversarial verification>
+- Delegation ground: <1 settled plan | 2 volume | 3 three-strike | 4 adversarial verification>
 
 ## Current Task
 <specific task description>
@@ -193,14 +227,14 @@ trace. An unknown location is not a wide sweep.
 
 **Step 2 — fix it yourself,** with the narrowest relevant test.
 
-Escalate only if step 2 fails twice on the same approach; then ground 1 holds and
+Escalate only if step 2 fails twice on the same approach; then ground 3 holds and
 `oracle` gets the two failed attempts *and* what you observed, not just the symptom.
 </example>
 
 <example>
 User: /omo this fix has failed twice — the test still hangs
 
-Ground 1 holds. Consult `oracle` with both attempts.
+Ground 3 holds. Consult `oracle` with both attempts.
 
 ```bash
 codeagent-wrapper --agent oracle - /path/to/project <<'EOF'
@@ -212,9 +246,9 @@ the async teardown test still hangs after two fix attempts
 - Librarian output: None
 - Oracle output: None
 - Known constraints: pytest -k teardown must pass; no new dependencies
-- Delegation ground: 1 three-strike
+- Delegation ground: 3 three-strike
 
-## Prior Attempts (required for ground 1)
+## Prior Attempts (required for ground 3)
 1. Awaited the cleanup task in the fixture — still hangs, no traceback.
 2. Moved cleanup to an atexit handler — hangs before atexit runs.
 Observed: the hang is before teardown, not inside it.
@@ -247,27 +281,66 @@ Consult `explore` for the inventory, then judge the results yourself. `explore`
 returns locations; it does not decide which call sites are wrong.
 </example>
 
+<example>
+User: /omo the plan in `.sp/plans/2026-08-29-token-bucket.md` is approved — build it
+
+Ground 1 holds: the design is written down and what is left is mechanical.
+
+```bash
+codeagent-wrapper --agent develop - /path/to/project <<'EOF'
+## Original User Request
+build the approved token-bucket rate limiter
+
+## Context Pack (every slot is filled; write "None" when there is nothing)
+- Explore output: None
+- Librarian output: None
+- Oracle output: None
+- Prior Attempts: None
+- Known constraints: `pytest tests/test_ratelimit.py` must pass; no new dependencies;
+  match the middleware style in src/middleware/auth.py
+- Delegation ground: 1 settled plan
+
+## Current Task
+Implement the plan below verbatim. Where it is silent, follow the surrounding file's
+existing pattern rather than inventing one, and say what you had to decide.
+
+<the plan, pasted in full — not a summary of it>
+
+## Acceptance Criteria
+The named test passes, and you list every place the plan was silent.
+EOF
+```
+
+Then *you* read the diff and run the tests. What came back is a draft; the list of
+places the plan was silent is the part to read first, because that is where a
+mechanical executor had to make a decision it was not given.
+</example>
+
 <anti_example>
 User: /omo add rate limiting to the API
 
 Wrong:
-- Consult `explore` to find the middleware (Grep finds it)
+- Consult `explore` to find the middleware (Grep finds it — a lookup is not volume)
 - Consult `oracle` because "it touches the API" (no open tradeoff yet)
-- Consult `develop` to write the change (you write code)
+- Consult `develop` to write the change (**the design is not settled** — per-account
+  vs global, which store, what happens on overflow. Ground 1 does not hold, and a
+  vendor handed this returns a confident answer to a question nobody asked)
 
 Right:
-- Find the middleware yourself, read the surrounding pattern, write the change
-- Consult `oracle` only if a real tradeoff surfaces — per-account vs global limits
-  with no obvious winner — and say so
+- Decide the shape first: read the surrounding pattern, settle per-account vs global,
+  write it down
+- *Then* ground 1 is available if the implementation is large enough to be worth the
+  round trip — and a two-line middleware hook is not
+- Consult `oracle` only if the tradeoff is genuinely open, and say so
 </anti_example>
 
 ## Forbidden Behaviors
 
-- **FORBIDDEN** to delegate without naming which of the three grounds holds.
+- **FORBIDDEN** to delegate without naming which of the four grounds holds.
 - **FORBIDDEN** to invoke a role without the original request and a complete
   Context Pack.
 - **FORBIDDEN** to approve your own work. The reviewing pass and the authoring pass
-  are different passes, and under ground 3 a different model.
+  are different passes, and under ground 4 a different model.
 - **FORBIDDEN** to treat `explore → oracle → develop` as a mandatory workflow.
 - **FORBIDDEN** to report a vendor's output as a result. It is advice; you verify it
   against the repo before acting on it.
@@ -281,8 +354,8 @@ requires — and closes with `## NOT Your Job` — what it must hand back to you
 |------|--------------|
 | `explore` | The sweep is wider than your context budget (ground 2) |
 | `oracle` | An open tradeoff, a two-failure escape, or an adversarial review |
-| `develop` | Backend/logic implementation you have a stated ground to hand off |
+| `develop` | Backend/logic implementation against a settled plan (ground 1) |
 | `frontend-ui-ux-engineer` | UI/styling implementation, same condition |
 | `document-writer` | Documentation writing, same condition |
 | `librarian` | External library behavior you cannot verify from the repo |
-| `security` | A security review, which is ground 3 by construction — the author cannot audit their own trust boundaries |
+| `security` | A security review, which is ground 4 by construction — the author cannot audit their own trust boundaries |

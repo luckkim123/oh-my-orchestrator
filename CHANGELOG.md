@@ -2,6 +2,62 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.0] - 2026-08-29 — the volume goes out, the decision stays
+
+### Changed
+- **omo's delegation model, rewritten around cost** (`skills/omo/SKILL.md`). The
+  operator's stated reason for building omo:
+
+  > "claude 하나로는 토큰 소모량이 너무 심해서 퀄리티는 claude가 담당하고, 작업은
+  > codex나 agy가 담당하는 느낌으로 하려고 해서야."
+
+  omo did not do that. It opened with "**You are the executor.** You read the code, you
+  make the edit, you run the tests", and its "Not grounds for delegation" list led with
+  **"It's a code change." You write code.** The role table bound `develop`, `explore`,
+  and `security` to codex, but nothing could reach them: the three grounds were
+  three-strike, context budget, and adversarial verification, and none of them is
+  "this is ordinary work". The vendor lane was wired and gated shut.
+
+  It now splits by strength the way `cco` does, along the axis this operator built it
+  for. cco puts deep reasoning on codex and bulk reading on Gemini, keeping Claude as
+  orchestrator; here the reasoning stays with Claude — that is the half worth paying
+  Opus for — and the two high-volume halves go out.
+
+  | | Before | Now |
+  |:---|:---|:---|
+  | Ground 1 | three-strike | **settled plan, mechanical execution** → `develop` |
+  | Ground 2 | context budget | volume — reading *or writing* wider than the decision |
+  | Ground 3 | adversarial verification | three-strike |
+  | Ground 4 | — | adversarial verification |
+
+  The line is not "who types" but **whether the decision is already made**. That keeps
+  what the old model was right about: upstream `myclaude` forbade the session to touch
+  code at all, so a one-line fix cost a round trip and lost the context that made it
+  correct. Undecided work still stays; decided work now goes.
+
+  Three guards came with it, because a delegation model without them just moves the
+  mistakes downstream:
+  - **"I know what I want" is not a settled plan.** If you cannot paste it, it is not
+    settled — and the plan goes to the vendor *verbatim*, not summarized.
+  - **What comes back is a draft, not a result.** The vendor is asked to list every
+    place the plan was silent, because that list is where a mechanical executor had to
+    decide something it was not given.
+  - **The saving is not free.** Reading the returned diff is a real cost; it is
+    positive on 400 lines and negative on 4. Written into the skill so the model does
+    not oversell it.
+
+### Notes
+- Ground numbering shifted, so every cross-reference moved with it — `SKILL.md`'s
+  routing table, role catalog, Context Pack template, examples, and
+  `references/vendor-ops.md`. The anti-example that read "Consult `develop` to write
+  the change (you write code)" is now an example of ground 1 *not* holding, for the
+  right reason: the design was never settled.
+- **What this does not answer**: how much it actually saves. Vendor calls leave no
+  durable record — `finding/104` measured that vendor workers write nothing to `.hq`,
+  and `codeagent-wrapper` logs land in `/var/folders/.../T/` and vanish with the
+  session. There is no denominator. PLAN §4.7 carries this as T-0: instrument the
+  wrapper before claiming a number.
+
 ## [0.14.0] - 2026-08-29 — filtering is not ordering
 
 ### Added
