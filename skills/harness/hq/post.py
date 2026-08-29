@@ -35,6 +35,18 @@ CATEGORIES = ("finding", "decision", "review", "handoff", "question")  # default
 TOPICS = (
     "architecture", "decision", "pattern", "debugging", "environment",
     "reference", "convention", "session-log",
+    # `technique` and `history` join the list because D22 put the retiring wiki
+    # taxonomy on this axis ("옛 위키 분류는 `topic:` 이 진다") and these two
+    # were missing from it. Measured, not assumed: the wiki trees still on
+    # backup use six category directories -- convention, decision, history,
+    # pattern, reference, technique -- and omd's own linter does not even list
+    # `technique` among its CATEGORIES while store-spec's omd row does. Without
+    # them the form conversion would have to merge `technique` into `pattern`
+    # and `history` into `reference`, which is a guess that loses the
+    # distinction the author drew. Widening an enum makes `hq lint` more
+    # permissive, so the two values are added on the evidence of real pages
+    # rather than to be safe.
+    "technique", "history",
 )
 # "none" is not an assessment, it is the explicit absence of one — the same
 # idiom `status:`/`supersedes:` already use. Added 2026-08-29 so a pre-schema

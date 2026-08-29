@@ -303,7 +303,8 @@ def edit(anchor_root, post_id, *, new_body=None, reason, author, now,
 
 
 def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
-          topic=None, status=None, project=None, weight_metadata=False):
+          topic=None, status=None, project=None, weight_metadata=False,
+          ascend=False):
     # An empty keyword is not "match everything" — `"" in hay` is always true
     # and `body.count("")` returns len(body)+1, so the query would come back
     # with every post ordered longest-first while looking like a search.
@@ -353,8 +354,6 @@ def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
             result["heads_nearest"] = [_post_to_dict(h) for h in nearest["heads"]]
         return result
 
-    posts = list_posts(roots[0])
-
     def matches(p):
         if keyword is not None:
             # Membership IS the ranker's own score, not a second rule that
@@ -379,19 +378,68 @@ def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
             return False
         return True
 
-    selected = [p for p in posts if matches(p)]
+    # `--ascend` searches every anchor the ascent reached, not just the nearest.
+    # It is opt-in because turning it on by default would silently widen every
+    # existing caller's result set -- omx's reader included. The retiring wiki
+    # form had exactly this two-level read (a project store plus the parent
+    # folder's, merged), and that capability has to arrive here before the wiki
+    # can go; a store that moved without it would answer local-only while
+    # looking complete.
+    search_roots = roots if ascend else roots[:1]
+
+    def _anchor_tag(root):
+        # Only under --ascend. Without it every result is from the nearest
+        # anchor and the field would be a constant. `--subject` marks the
+        # non-nearest instead (`citation`), because there one post is canonical
+        # and the rest are shadows; here the results are a flat merged list, so
+        # every row says where it came from rather than making absence mean
+        # "nearest" -- a rule a reader gets wrong exactly once.
+        return _resolve_anchor_id(root) if ascend else None
+
     if keyword is None:
-        return {"posts": [_post_to_dict(p) for p in selected]}
+        out = []
+        for root in search_roots:
+            tag = _anchor_tag(root)
+            for p in list_posts(root):
+                if not matches(p):
+                    continue
+                d = _post_to_dict(p)
+                if tag is not None:
+                    d["anchor"] = tag
+                out.append(d)
+        return {"posts": out}
 
     # Filtering is not ordering. Before this the result came back in post-number
     # order, so `--keyword graphify` led with a post that mentions graphify once
     # in passing while the post *about* graphify sat tenth.
+    #
+    # Ranking runs PER ANCHOR and the ranked lists are CONCATENATED, nearest
+    # store first -- never re-sorted on the two exposed scores.
+    #
+    # Per anchor because `all_posts` is how the ranker learns what is
+    # superseded, and `supersedes:` names an id unique only within one anchor:
+    # pooled, anchor A's `finding/007` would mark anchor B's `finding/007` as
+    # superseded.
+    #
+    # Concatenated because `(field, body)` is not the ranker's order, only the
+    # part of it that is reported. Its key also carries the metadata weight,
+    # chain-head, date and number, and a grounded contradiction deliberately
+    # sinks a post BELOW a weaker match -- re-sorting on the two visible scores
+    # silently undid that (caught by `RankContradictedSinksTest`). Nearest-first
+    # is also what the two-level wiki model this replaces actually promised:
+    # the local store is the project's answer, the parent's is the fallback.
     out = []
-    for post, field_score, body_score in rank(selected, keyword, all_posts=posts,
-                                              weighted=weight_metadata):
-        d = _post_to_dict(post)
-        d["score"] = {"field": field_score, "body": body_score}
-        out.append(d)
+    for root in search_roots:
+        tag = _anchor_tag(root)
+        posts = list_posts(root)
+        selected = [p for p in posts if matches(p)]
+        for post, field_score, body_score in rank(selected, keyword, all_posts=posts,
+                                                  weighted=weight_metadata):
+            d = _post_to_dict(post)
+            d["score"] = {"field": field_score, "body": body_score}
+            if tag is not None:
+                d["anchor"] = tag
+            out.append(d)
     return {"posts": out}
 
 

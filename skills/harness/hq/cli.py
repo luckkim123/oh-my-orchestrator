@@ -113,6 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
     query_p.add_argument("--weight-metadata", action="store_true",
                          help="opt-in: let confidence:/status: re-order NEAR-TIED "
                               "keyword matches (off by default -- see rank.py)")
+    query_p.add_argument("--ascend", action="store_true",
+                         help="opt-in: search every anchor the ascent reaches, not "
+                              "just the nearest; each result carries its `anchor`")
 
     sub.add_parser("index")
     sub.add_parser("lint")
@@ -181,6 +184,7 @@ def main(argv=None) -> int:
                 start, subject=args.subject, post_id=args.post_id, keyword=args.keyword,
                 harness=args.harness, topic=args.topic, status=args.status,
                 project=args.project, weight_metadata=args.weight_metadata,
+                ascend=args.ascend,
             )
             _print(result, args.json)
             return 0

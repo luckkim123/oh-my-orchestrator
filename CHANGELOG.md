@@ -2,6 +2,117 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.18.0] - 2026-08-30 — the wiki form is retired, and the two-level read it promised arrives here
+
+The sibling harnesses (oms, omd, omp) each carried their own reader over
+`community/wiki/`, and PLAN item 6 said to replace those helpers with `hq`
+calls. Measured, that is not possible as written: **`hq` has no wiki verb**
+(post·comment·edit·query·index·lint·gc), and the checks barely overlap — `hq
+lint` does id uniqueness, supersede chains, enum values and review counting,
+while the three helpers do misplaced/near-dup/stale/orphan/oversized/INDEX
+drift. The real duplication was among the siblings: three readers of one path
+with three different shape assumptions (omd and oms expect category
+sub-directories, omp globs `wiki/*.md` flat).
+
+And every one of those readers was aimed at nothing. On this machine no anchor
+holds a wiki page — the vault converted on 2026-08-28 and the workspace with
+it — while the same anchors hold 127/33/17 posts. The three readers disagreed
+even about how to say so: oms exits non-zero, omd returns `('info','empty', …,
+'no wiki store at this root (fresh project — not an error)')`, and omp returns
+`[]`. Two of the three report an all-clear over a store they never opened.
+
+So the user retired the form outright ("wiki 는 아예 없애는 걸로. Wiki 폴더
+안만들게") and asked for the conversion procedure first. This release is hq's
+half of that.
+
+### Added
+- **`hq query --ascend`** — opt-in. Searches every anchor the ascent reaches
+  instead of only the nearest, and every returned post carries its `anchor`.
+
+  This is the capability the retiring wiki form actually had and `hq` did not.
+  omd's and oms's wiki was read at **two levels** — the project's store plus the
+  parent folder's, merged by ascent — and `doc-inspector`'s `wiki_query(category)`
+  stands on that. `hq query --keyword` read `roots[0]`: the nearest anchor, full
+  stop. Only `--subject` walked the chain. Converting the pages without this
+  would have moved the layer and dropped the capability, which is the exact
+  failure this campaign's PLAN §1 exists to prevent.
+
+  Ranking runs **per anchor** and the ranked lists are concatenated, nearest
+  first — never re-sorted on the two exposed scores. Per anchor because
+  `all_posts` is how the ranker learns what is superseded and `supersedes:`
+  names an id unique only within one anchor; pooled, anchor A's `finding/007`
+  would mark anchor B's as superseded. Concatenated because `(field, body)` is
+  only the *reported* part of the ranker's key — the rest carries chain-head,
+  date and number, and a grounded contradiction deliberately sinks a post below
+  a weaker match. The first cut re-sorted on the two scores and silently undid
+  that; `RankContradictedSinksTest` caught it.
+- **`skills/harness/convert-wiki-form.py`** — the wiki→posts conversion, in two
+  phases. `plan` derives what is derivable and leaves three fields null;
+  `apply` refuses while any is null, writes each post through `verbs.post_new`
+  (the store's one serializer, whose `now=` takes the page's own date — the
+  CLI's missing `--date` is what forced the post-hoc `sed` that `finding/098`
+  recorded as a trap), verifies the body survived byte-for-byte, and `git rm`s
+  the originals.
+
+  It refuses to guess `category`, `subject`, and a missing title because
+  `finding/098` measured each one going wrong: reader-intent category
+  assignment is D22's call per page ("everything ends up in one `finding/`" is
+  the named anti-pattern), filename-derived subjects were truncated at 64 chars
+  or carried a date that locks later posts out of the chain, and two pages had
+  no H1 at all.
+
+  `verified:` is derived as **the largest ISO date the page's own text
+  mentions**, not from git: `git log --follow -M` skips into an unrelated
+  file's history on a migrated tree, and gave three contradictory answers for
+  the same seven files.
+- **`technique` and `history` in `TOPICS`.** D22 put the wiki taxonomy on this
+  axis and these two were missing from it. Measured on the wiki trees still on
+  backup: six category directories are in use — convention, decision, history,
+  pattern, reference, technique — and `technique` is not even in omd's own
+  `lint_wiki.CATEGORIES` while store-spec's omd row lists it. Without them the
+  conversion would have to merge `technique` into `pattern` and `history` into
+  `reference`, losing a distinction the author drew. Widening an enum makes
+  `hq lint` more permissive, so both were added on the evidence of real pages.
+
+### Changed
+- **The anchor ascent now stops at the user's home directory.** Two unrelated
+  projects under `~` share `~` and `/Users`, so a single `.hq/.anchor` at
+  either would silently merge them. This is omd's ST-3 gate, which existed only
+  as prose in `references/wiki/README.md` — its test asserted the *sentence*
+  appeared twice, and nothing enforced it. The wiki form it guarded is retired,
+  so the guarantee moves into code. A start path outside home keeps the full
+  ascent: a container mount like `/workspace` is a documented anchor location
+  and home is not its ancestor.
+- **`store-spec.md` §9.3**: the four `community/wiki/` target rows are retired
+  and now point at `community/posts/`, the blockquote that said "the `wiki/`
+  target above still stands" is replaced, and its citation is corrected from
+  `finding/021` to `finding/098` (the D29 anchor merge renumbered it, and
+  `finding/021` is now an unrelated post).
+
+### Verification
+- 246 tests pass (`skills/harness/tests/`), up from 223.
+- **Eleven mutations, each caught by at least one test**: dropping the HOME
+  break; bounding at `home.parent`; ignoring `--ascend`; pooling `all_posts`
+  across anchors; always emitting the `anchor` tag; removing the re-apply
+  guard; removing the unfilled-judgment refusal; accepting an unmappable
+  category; leaving the H1 in the body; taking the first ISO date instead of
+  the largest; ignoring the plan's refusals.
+- **Live round-trip on a copy** of a real 29-page wiki tree (the workspace's,
+  from the Google Drive backup — the backup itself was never touched): 26
+  posts, 3 tool-generated pages dropped, 0 refusals, **body byte-identical
+  26/26**, `hq lint` clean, `git rm` of all 29.
+- The re-apply guard came out of that run. The help text says "rerun with
+  `--commit`", and the rerun **minted a second copy of all 26 posts** — visible
+  only one layer downstream, as `hq lint` reporting two chain heads per
+  subject. `apply` now skips a page whose `subject` already has a head, which
+  also makes an interrupted run resumable rather than destructive.
+
+### Notes
+- `--ascend` is opt-in for the same reason `--weight-metadata` is: on by
+  default it would silently widen every existing caller's result set.
+- This release is hq's half of PLAN item 6. The sibling half — oms/omd/omp
+  dropping `wiki_dir()` and calling `hq` — follows in their own releases.
+
 ## [0.17.0] - 2026-08-29 — the weights come back, as a flag, on the tier that breaks ties
 
 ### Added

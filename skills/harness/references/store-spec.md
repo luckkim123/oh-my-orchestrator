@@ -568,7 +568,7 @@ read-path updates.
 | `STRUCTURE.md` · `DATASETS.md` | `config/project/` | ②③ tie, ③ wins (`omp_content_audit.py:113`) |
 | `learned.md` | `config/project/` | ③ (`omp_content_audit.py:201`) |
 | `PROJECT.md` · `NAMING.md` · `CONVENTIONS.md` | `community/` | ② — prompt strings only, no parser |
-| `wiki/*.md` | `community/wiki/` | ② — **P3 shipped `wiki/`, not `posts/`**: the `posts/` target assumes the §4 conversion (per-page `subject:`), which is a P6 item. The layer moved now; the form is deferred |
+| `wiki/*.md` | `community/posts/` | ② — **the wiki form is RETIRED (r7, 2026-08-30).** P3 shipped `wiki/` because `migrate-om-store.sh` moves files and cannot mint a per-page `subject:`; the §4 conversion that closes that gap now has a tool (`skills/harness/convert-wiki-form.py`, two phases: it derives what is derivable and refuses to guess `category`/`subject`/a missing title). A store still holding `wiki/` converts with it. ⚠️ omp's tree is FLAT — `omp_content_audit.lint_wiki` globs `wiki/*.md`, so those pages have no category directory and `topic:` is a judgment call rather than a copy |
 | `secretary/ledger.jsonl` | `config/project/` | ⑤(b) fails — it is the history |
 | `secretary/journal/` · `BRIEF.md` · `raid.md` · `todo.txt` · `done.txt` | **community candidate — P6 approval item** | ② by rule; the transition needs a `chronicler` hook revision, so the choice is preserved rather than forced |
 | `env/` | `config/project/` | ③ — the `omp-env` canonical Dockerfile/compose assets (**added P5**: absent from this table until `krit/simulator`'s 7 files were censused) |
@@ -577,16 +577,26 @@ read-path updates.
 | `work/{audits,plans,scans,tmp,versions}/` | `work/project/` | ④ |
 | `.DS_Store` | **not moved** | not ours |
 
-> **The deferred form was converted for one tree on 2026-08-28** — the vault's
-> three anchors (`vault`, `vault-albc`, `vault-krit-simulator`), 16 pages, by
-> hand into `posts/` under the five reader-intent categories. **The `wiki/`
-> target above still stands**: a store that has not migrated yet still lands in
-> `community/wiki/`, because `migrate-om-store.sh` moves files and cannot mint
-> the per-page `subject:` the §4 form needs. The conversion is a second, manual
-> pass over an already-migrated anchor, not a change to this mapping. What that
-> pass measured — the field mapping per source form, the fields dropped, and why
-> `verified:` cannot be derived from git in a tree that has been migrated — is in
-> the vault harness board's `finding/021`.
+> **The wiki form is retired (r7, 2026-08-30) and `community/wiki/` is no longer
+> a target any of the four rows above may land in.** It was converted for the
+> vault's three anchors on 2026-08-28 (16 pages, by hand, into `posts/` under
+> the five reader-intent categories), and for the workspace shortly after; on
+> this machine no anchor holds a wiki page any more. What blocked doing it
+> everywhere was that `migrate-om-store.sh` moves files and cannot mint the
+> per-page `subject:` the §4 form needs — so the conversion is a second pass
+> over an already-migrated anchor, and r7 gave it a tool:
+> `skills/harness/convert-wiki-form.py`. It derives what is derivable and
+> **refuses to guess** the three fields the hand conversion had to decide
+> (`category` by reader intent per D22, `subject`, and a title when the page has
+> no H1). What the hand pass measured — the field mapping per source form, the
+> fields dropped, and why `verified:` cannot be derived from git in a tree that
+> has been migrated — is in the vault board's **`finding/098`** (it was
+> `finding/021` when written; the 2026-08-29 D29 anchor merge renumbered it, and
+> `finding/021` is now an unrelated post).
+>
+> Nothing may create a `community/wiki/` directory from here on (user decision,
+> 2026-08-30: "wiki 는 아예 없애는 걸로. Wiki 폴더 안만들게"). The converter reads
+> that tree where it already exists and exits with an error where it does not.
 
 `oms` store:
 
@@ -597,7 +607,7 @@ read-path updates.
 | `workflows/*.js` | `config/scholar/workflows/` | ③ — executed by a verb |
 | a Workflow `.js` at the store root (`section3_audit_workflow.js`) | `config/scholar/` | ③ — same class as the row above (`export const meta`, hand-authored, run by a verb), placed at the store root rather than in `workflows/` (**added P6**: absent from this table until `12_Masters_Thesis/.oms` was censused). It keeps the root position — this table assigns layers, and tidying placement here would make `reverse` land the file where it never was |
 | `state/verified-citations.json` | `config/scholar/` | ⑤(b) fails — **stays tracked**, approval item |
-| `wiki/{convention,decision,pattern,reference,history}/` · `wiki/INDEX.md` · `wiki/README.md` | `community/wiki/` | ② — same deferral as omp's row above; `INDEX.md`/`README.md` live *inside* `wiki/`, not at the store root (measured, workspace `.oms`) |
+| `wiki/{convention,decision,pattern,reference,history}/` · `wiki/INDEX.md` · `wiki/README.md` | `community/posts/` | ② — retired with omp's row above (r7). `INDEX.md`/`README.md` live *inside* `wiki/`, not at the store root (measured, workspace `.oms`), and both are DROPPED rather than converted: `hq index` regenerates the first and the second documents a form that no longer exists. `history/` is a real category here and had no `topic:` until r7 added one |
 | `<slug>/{versions,renders,research,outline,figure_survey,tmp,gen-image,methodology}/` | `work/scholar/<slug>/` | ④ |
 | `<slug>/*.md` skeletons · `PATHS.md` · `*_PROMPT.md` · `DECISIONS_NEEDED.md` | `work/scholar/<slug>/` | ④ — per-run scaffolding |
 | `_backport-design/` | `community/` | ② |
@@ -610,7 +620,7 @@ read-path updates.
 | `<slug>/{build,renders,versions,assets,verify-runs,archive_*}/` | `work/docs/<slug>/` | ④ |
 | `<slug>/{OUTLINE,SCRIPT,SPEAKER_NOTES,RESUME,RESTART_PROMPT,build-notes}.md` | `work/docs/<slug>/` | ④ |
 | `<slug>/spec/` | `work/docs/<slug>/` | ④ |
-| `wiki/{convention,pattern,technique}/` | `community/wiki/` | ② — **added P5**: absent from this table until workspace's `.omd` was censused |
+| `wiki/{convention,pattern,technique}/` | `community/posts/` | ② — retired with the two rows above (r7); **added P5**: absent from this table until workspace's `.omd` was censused. `technique/` is not in omd's own `lint_wiki.CATEGORIES` and had no `topic:` until r7 added one — the linter and this table disagreed about the store's own shape |
 | `.hook-throttle.json` | `runtime/docs/` | ⑤ |
 | `HANDOFF_omd_audit.md` | `community/posts/` | ② — becomes a `handoff/` post |
 
@@ -641,8 +651,8 @@ gate", and that deferral was the assignment):
 | `profile/*` | `config/experiments/profile/` | ③ — `evaluator.sh`, `metrics.yaml`, `rules.md`, `launch.sh`, `seal.json`, `tree.yaml`; hand-tuned and read by verbs |
 | `programs/<id>/program.json` | `config/experiments/programs/<id>/` | ③ — `campaign.py:305,346` reads it |
 | `programs/<id>/PLAN.md` · `HANDOFF.md` | `community/programs/<id>/` | ② — templates seed them, humans write them; `campaign.py:360` only tests `.is_file()`. **The directory is split per file**, which is why §3's tree no longer lists `programs/` under `work/`: `**/.hq/work/` is gitignored, so sending the bundle whole would have untracked albc's plan of record (`finding/018`) |
-| `registry/findings/*.md` | `community/wiki/` | ② — same class as omp's, oms's and omd's `wiki/`. `omx wiki` lints them, but so does `omp_content_audit.py:152` for omp's; ③ is for content a program consumes as input, not for content a linter audits |
-| `registry/index.md` | `community/wiki/index.md` | ② — derived but tracked, the same call as `community/INDEX.md`. ⚠️ case-collides with an oms `wiki/INDEX.md` in the *same* anchor on a case-insensitive filesystem; no censused anchor holds both, so the rename is deferred rather than guessed |
+| `registry/findings/*.md` | `community/posts/` | ② — same class as omp's, oms's and omd's `wiki/`, and retired with them (r7). `omx wiki` used to lint them; that engine was retired in r6 and `omp_content_audit.py`'s wiki clause in r7. ③ is for content a program consumes as input, not for content a linter audits |
+| `registry/index.md` | **dropped** | ② by rule, but the wiki retirement (r7) makes it moot: it is a tool-generated index of a form that no longer exists, and `hq index` writes `community/INDEX.md` in its place. The converter drops `index.md`/`INDEX.md`/`README.md` rather than converting them. This also closes the case-collision this row used to flag (an oms `wiki/INDEX.md` in the same anchor on a case-insensitive filesystem) — neither file lands any more |
 | `registry/log.md` | `runtime/experiments/registry/` | ⑤ — chronicles wiki *operations* (`add`, `query`), not the knowledge; the pages are the record. **`detrack` approval item** — albc's is tracked today |
 | `registry/.wiki-lock` · `state/.state-lock` · `runs/<id>/.loop-lock` | **not moved** | mutex files recreated on demand, same call as `.hq-lock` |
 | `recipes/*.md` | `community/recipes/` | ② — promoted diagnostic checklists a human reads before diagnosis |

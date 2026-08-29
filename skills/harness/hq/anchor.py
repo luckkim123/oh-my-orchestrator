@@ -56,15 +56,34 @@ def parse_anchor(path: Path) -> str:
 def find_anchors(start: Path) -> list:
     """Ascent from start.resolve() through every parent, nearest first. One
     Anchor per directory carrying a parseable .hq/.anchor. An unparseable
-    anchor propagates HqError — a broken anchor is not an absent one. Stops
-    at the filesystem root (Path.parents exhausts there on its own).
+    anchor propagates HqError — a broken anchor is not an absent one.
+
+    The ascent stops AT the user's home directory and never examines its
+    parents. Two unrelated projects under `~` share `~` and `/Users` as
+    ancestors, so without this bound a single `.hq/.anchor` placed at either
+    would silently merge them — one project's store answering another
+    project's query. This is omd's ST-3 gate, which until now existed only as
+    prose in `references/wiki/README.md` (its test asserted the sentence was
+    printed twice, not that anything enforced it); the wiki form it guarded is
+    retired, so the guarantee moves here, into code.
+
+    A start path OUTSIDE the home directory keeps the full ascent to the
+    filesystem root: a container mount like `/workspace` is a documented
+    anchor location (`.claude/rules/code-graph.md`), home is not its ancestor,
+    and bounding there would find nothing at all.
     """
     anchors: list = []
     cur = start.resolve()
+    try:
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):
+        home = None
     for d in [cur, *cur.parents]:
         anchor_file = d / ANCHOR_REL
         if anchor_file.is_file():
             anchors.append(Anchor(root=d, id=parse_anchor(anchor_file)))
+        if home is not None and d == home:
+            break
     return anchors
 
 

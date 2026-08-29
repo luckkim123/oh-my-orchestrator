@@ -1417,3 +1417,151 @@ class ReviewAuthorIdentityTest(unittest.TestCase):
             with self.assertRaises(HqError):
                 verbs.comment(root, "finding/001", author="  ", text="x",
                               now="2026-08-29")
+
+
+class QueryAscendTest(unittest.TestCase):
+    """`--ascend` (r7 A): the two-level read the retiring wiki form promised.
+
+    Without it a keyword query sees the nearest anchor only, which is what
+    `omd`/`oms` would have silently lost when their `community/wiki/` --
+    read as local PLUS the parent folder's -- became posts.
+    """
+
+    def _two_anchors(self, tmp):
+        outer = Path(tmp) / "outer"
+        inner = outer / "inner"
+        inner.mkdir(parents=True)
+        _write_anchor(outer, "outer-anchor")
+        _write_anchor(inner, "inner-anchor")
+        _write_post(outer, "finding", 1, title="Caption rules for decks",
+                    extra_bullets="- keywords: caption\n")
+        _write_post(inner, "finding", 1, title="Caption defects in this deck",
+                    extra_bullets="- keywords: caption\n")
+        return inner
+
+    def test_off_by_default_sees_only_the_nearest_anchor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inner = self._two_anchors(tmp)
+            got = verbs.query(inner, keyword="caption")["posts"]
+            self.assertEqual([p["title"] for p in got],
+                             ["Caption defects in this deck"])
+
+    def test_ascend_adds_the_outer_anchor_nearest_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inner = self._two_anchors(tmp)
+            got = verbs.query(inner, keyword="caption", ascend=True)["posts"]
+            self.assertEqual([p["title"] for p in got],
+                             ["Caption defects in this deck", "Caption rules for decks"])
+            self.assertEqual([p["anchor"] for p in got],
+                             ["inner-anchor", "outer-anchor"])
+
+    def test_every_row_names_its_anchor_absence_never_means_nearest(self):
+        # Both anchors' rows carry `anchor` under --ascend, and none carry it
+        # when it is off. A reader must never have to infer "no field = local".
+        with tempfile.TemporaryDirectory() as tmp:
+            inner = self._two_anchors(tmp)
+            on = verbs.query(inner, keyword="caption", ascend=True)["posts"]
+            off = verbs.query(inner, keyword="caption")["posts"]
+            self.assertTrue(all("anchor" in p for p in on))
+            self.assertTrue(all("anchor" not in p for p in off))
+
+    def test_ascend_also_applies_to_a_filter_only_query(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inner = self._two_anchors(tmp)
+            got = verbs.query(inner, topic=None, ascend=True)["posts"]
+            self.assertEqual(len(got), 2)
+            self.assertEqual([p["anchor"] for p in got],
+                             ["inner-anchor", "outer-anchor"])
+
+    def test_supersession_does_not_leak_across_anchors(self):
+        """`supersedes:` names an id unique only within one anchor, so ranking
+        a POOLED set would let the inner `finding/002` (which supersedes its
+        own `finding/001`) mark the OUTER `finding/001` as superseded too.
+
+        Being a chain head is a tiebreaker above date, so the two outer posts
+        are built to tie on score and differ only in date: heads-both puts the
+        newer `finding/001` first, and a leaked supersession sinks it below
+        `finding/002`. Without the date difference the assertion passes either
+        way -- number ordering already puts `002` first.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            outer = Path(tmp) / "outer"
+            inner = outer / "inner"
+            inner.mkdir(parents=True)
+            _write_anchor(outer, "outer-anchor")
+            _write_anchor(inner, "inner-anchor")
+            newer = _write_post(outer, "finding", 1, title="Outer caption A",
+                                extra_bullets="- keywords: caption\n")
+            newer.write_text(
+                newer.read_text(encoding="utf-8").replace(
+                    "date: 2026-08-27", "date: 2026-08-28"),
+                encoding="utf-8")
+            _write_post(outer, "finding", 2, title="Outer caption B",
+                        extra_bullets="- keywords: caption\n")
+            _write_post(inner, "finding", 1, title="Inner caption v1",
+                        extra_bullets="- subject: caption · supersedes: none\n"
+                                      "- keywords: caption\n")
+            _write_post(inner, "finding", 2, title="Inner caption v2",
+                        extra_bullets="- subject: caption · supersedes: finding/001\n"
+                                      "- keywords: caption\n")
+            got = [p["title"] for p in
+                   verbs.query(inner, keyword="caption", ascend=True)["posts"]]
+            self.assertEqual(got, ["Inner caption v2", "Inner caption v1",
+                                   "Outer caption A", "Outer caption B"])
+
+
+class AnchorAscentHomeBoundTest(unittest.TestCase):
+    """ST-3, moved from prose into code (r7 A).
+
+    omd's `references/wiki/README.md` promised the ascent "never climbs above
+    the user's home directory", and its test asserted that the SENTENCE
+    appeared twice -- nothing enforced it. The wiki form is retired, so the
+    guarantee has to live in the ascent that replaces it.
+    """
+
+    def _run(self, start, home):
+        import os
+        old = os.environ.get("HOME")
+        os.environ["HOME"] = str(home)
+        try:
+            return [a.id for a in anchor.find_anchors(start)]
+        finally:
+            if old is None:
+                del os.environ["HOME"]
+            else:
+                os.environ["HOME"] = old
+
+    def test_an_anchor_above_home_is_not_reached(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            above = Path(tmp).resolve()
+            home = above / "home"
+            proj = home / "proj"
+            proj.mkdir(parents=True)
+            _write_anchor(above, "above-home")
+            _write_anchor(proj, "project")
+            self.assertEqual(self._run(proj, home), ["project"])
+
+    def test_an_anchor_at_home_itself_is_still_reached(self):
+        # The bound is "stop AT home", not "stop below it" -- a store the user
+        # keeps in their own home directory is theirs to reach.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = (Path(tmp) / "home").resolve()
+            proj = home / "proj"
+            proj.mkdir(parents=True)
+            _write_anchor(home, "home-anchor")
+            _write_anchor(proj, "project")
+            self.assertEqual(self._run(proj, home), ["project", "home-anchor"])
+
+    def test_a_start_outside_home_keeps_the_full_ascent(self):
+        # A container mount like `/workspace` is a documented anchor location
+        # and home is not its ancestor; bounding there would find nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            home = base / "home"
+            home.mkdir()
+            mount = base / "workspace"
+            proj = mount / "proj"
+            proj.mkdir(parents=True)
+            _write_anchor(base, "mount-parent")
+            _write_anchor(proj, "project")
+            self.assertEqual(self._run(proj, home), ["project", "mount-parent"])
