@@ -14,8 +14,8 @@ from .anchor import (
 )
 from .post import CONFIDENCES, STATUSES, TOPICS, Post, parse_bullet_line
 from .store import (
-    list_posts, list_posts_with_errors, next_number, read_post, update_index,
-    with_store_lock, write_post,
+    INDEX_NAME, community_dir, list_posts, list_posts_with_errors, next_number,
+    read_post, update_index, with_store_lock, write_post,
 )
 
 _DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
@@ -238,6 +238,39 @@ def index(anchor_root, now):
     return with_store_lock(anchor_root, _do)
 
 
+_INDEX_ID_RE = re.compile(r"^- `([a-z]+/\d{3})`", re.M)
+
+
+def _index_drift(anchor_root, posts):
+    """Post ids on disk vs ids listed in INDEX.md.
+
+    `hq post` regenerates the index inside the write lock, so the verb path
+    never drifts. What drifts is everything else: a post written by heredoc,
+    a rename, a `git rm`, a migration script. None of those pass through a
+    verb, so no verb can catch them — and a stale index fails the way this
+    store's failures always fail, by answering confidently: `hq query` simply
+    does not return the missing post. Lint is the one place that already
+    reads every post, so the comparison is nearly free here and nowhere else.
+    """
+    idx = community_dir(anchor_root) / INDEX_NAME
+    if not idx.exists():
+        return [f"{INDEX_NAME} is absent — run `hq index`"] if posts else []
+    listed = set(_INDEX_ID_RE.findall(idx.read_text(encoding="utf-8")))
+    on_disk = {p.id for p in posts}
+    out = []
+    missing = sorted(on_disk - listed)
+    stale = sorted(listed - on_disk)
+    if missing:
+        out.append(f"{INDEX_NAME} is stale — {len(missing)} post(s) on disk are not "
+                   f"listed ({', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}); "
+                   f"run `hq index`")
+    if stale:
+        out.append(f"{INDEX_NAME} lists {len(stale)} post(s) that no longer exist "
+                   f"({', '.join(stale[:5])}{'...' if len(stale) > 5 else ''}); "
+                   f"run `hq index`")
+    return out
+
+
 def lint(start):
     errors: list = []
     warnings: list = []
@@ -304,6 +337,8 @@ def lint(start):
         s = p.fields.get("status")
         if s is not None and s not in STATUSES:
             errors.append(f"{p.id}: status {s!r} not in {STATUSES}")
+
+    errors.extend(_index_drift(root, posts))
 
     numbers = sorted(p.number for p in posts)
     if numbers:

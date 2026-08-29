@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - 2026-08-29 — the index drifts everywhere the verbs are not
+
+### Added
+- **`hq lint` now fails on index drift.** It compares the post ids on disk with
+  the ids listed in `INDEX.md` and reports both directions — posts present but
+  unlisted, and listed posts that no longer exist.
+
+  `hq post` has always regenerated the index inside the write lock, so the verb
+  path never drifted. Everything else does: a post written by heredoc, a rename,
+  a `git rm`, a migration script. None of those pass through a verb, so no verb
+  can catch them, and the failure is the silent kind this store keeps recording —
+  `hq query` simply does not return the missing post, with no error anywhere.
+  Lint already reads every post, so the comparison is nearly free there and
+  nowhere else. `comment` and `edit` deliberately do **not** reindex: `INDEX.md`
+  carries id, subject, title and summary, none of which either verb touches.
+
+### Fixed
+- `skills/omo/SKILL.md` preflight now checks `codeagent-wrapper` itself, not only
+  the role backends. The wrapper ships as Go source rather than a published
+  artifact, so a machine that never ran `make build` has no vendor lane at all
+  while every backend check passes — which is exactly how one machine passed the
+  preflight with no entry point installed.
+- `.claude-plugin/plugin.json` description named `.orchestration/`, retired by the
+  `.hq/` cutover. It is the marketplace line a user reads before installing.
+
 ## [0.9.0] - 2026-08-29
 
 ### Changed

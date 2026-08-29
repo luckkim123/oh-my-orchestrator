@@ -472,5 +472,34 @@ class ProjectFieldTest(unittest.TestCase):
             self.assertEqual(verbs.lint(root)["errors"], [])
 
 
+class IndexDriftTest(unittest.TestCase):
+    """`hq post` reindexes inside the write lock, so the verb path never drifts.
+    Everything else does -- a heredoc, a rename, a `git rm`, a migration script --
+    and a stale index fails silently: `hq query` just does not return the post."""
+
+    def test_hand_written_post_is_reported_as_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "one-repo")
+            verbs.post_new(root, category="finding", title="T", author="t",
+                           summary="s", body="b", now="2026-08-29")
+            self.assertEqual(verbs.lint(root)["errors"], [])
+            _write_post(root, "finding", 2, title="B")     # 손으로 쓴 것 -- verb 를 안 탄다
+            errs = verbs.lint(root)["errors"]
+            self.assertTrue(any("stale" in e and "finding/002" in e for e in errs), errs)
+            verbs.index(root, "2026-08-29")
+            self.assertEqual(verbs.lint(root)["errors"], [])
+
+    def test_deleted_post_still_listed_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "one-repo")
+            verbs.post_new(root, category="finding", title="T", author="t",
+                           summary="s", body="b", now="2026-08-29")
+            (root / ".hq/community/posts/finding/001-t.md").unlink()
+            errs = verbs.lint(root)["errors"]
+            self.assertTrue(any("no longer exist" in e for e in errs), errs)
+
+
 if __name__ == "__main__":
     unittest.main()
