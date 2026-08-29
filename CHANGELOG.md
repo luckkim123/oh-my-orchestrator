@@ -139,7 +139,7 @@ All notable changes to this project will be documented in this file.
   on PATH, per machine.
 
 - **Five more, found by handing the diff to codex with "attack it, do not write a
-  patch".** Six judgments went in; it rejected five, and all five reproduced. Four of
+  patch".** Eight judgments went in; it rejected five, and all five reproduced. Four of
   them were one root cause — **substring matching where token matching was meant**:
 
   | Query | What used to lead | Why |
