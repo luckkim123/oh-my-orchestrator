@@ -90,7 +90,7 @@ half of that.
   `finding/021` is now an unrelated post).
 
 ### Verification
-- 246 tests pass (`skills/harness/tests/`), up from 223.
+- 266 tests pass (`skills/harness/tests/` 259 + 7 elsewhere), up from 223.
 - **Eleven mutations, each caught by at least one test**: dropping the HOME
   break; bounding at `home.parent`; ignoring `--ascend`; pooling `all_posts`
   across anchors; always emitting the `anchor` tag; removing the re-apply
@@ -106,6 +106,71 @@ half of that.
   only one layer downstream, as `hq lint` reporting two chain heads per
   subject. `apply` now skips a page whose `subject` already has a head, which
   also makes an interrupted run resumable rather than destructive.
+
+### Fixed after the pre-merge attack
+
+The first cut of everything above was handed to **two vendors from different
+families, same prompt, same commit** — and they came back with almost no
+overlap. agy (Gemini) found parser and boundary defects; codex (GPT) found
+contract and side-effect defects. Eleven were reproduced and fixed:
+
+- **The HOME bound was on one of the two ascents.** `_resolve_anchor_roots_for_query`
+  falls back to `find_anchor_root` whenever the strict ascent finds no
+  `.hq/.anchor`, and that function had no bound — so the guard was absent for
+  exactly the trees with no anchor of their own to protect them.
+- **`d == home` compared strings.** `Path` equality is textual, so a
+  case-insensitive filesystem or a symlinked route to the same directory never
+  matched and the loop ran to `/`. Now `(st_dev, st_ino)`.
+- **`--post-id` ignored `--ascend`**, so the flag returned
+  `{"id": "finding/007", "anchor": "outer"}` and the obvious follow-up raised
+  "does not exist". It now resolves nearest-first across the ascent and names
+  the anchor it answered from.
+- **The converter `git rm`ed a page it never converted.** Two pages given one
+  `subject` — the second hit the already-converted guard, landed in `skipped`,
+  and `skipped` was folded into the removal list. Duplicate subjects are now
+  refused before anything is written.
+- **The frontmatter fence was `text.find("\n---")`**, which matched the first
+  three dashes anywhere — a `---` inside a code fence ended the frontmatter and
+  every prose line above it was dropped, then the page was removed. Both fences
+  must now be a line that is exactly `---`.
+- **The H1 pattern matched `# comment` inside a code fence**, taking a shell
+  comment as the post title and deleting that line from the snippet.
+- **`kept_fields` was recorded and never read.** `apply` looked for
+  `confidence` at the top level of the entry while `plan` put it inside that
+  dict, so all 26 pages of the real backup tree reached their posts as
+  `confidence: none` while the plan showed the value preserved.
+- **`--commit` staged the deletions and not the posts**, so a commit made right
+  after recorded the originals disappearing and nothing arriving.
+- **A page's `date:` could forge frontmatter.** `date` shares its bullet with
+  `author`/`harness`/`to`, joined by " · ", and `now=` was free text from a
+  file: a value of `2026-08-07 · author: someone-else` wrote the author line
+  and `hq lint` passed it. `post_new` now requires `YYYY-MM-DD`.
+- **`now="unknown"`** outsorted every real date — the ranker's date tiebreaker
+  is a string compare and `"unknown" > "2026-08-30"`. Undated pages are refused.
+- **`TOPICS` was widened in code only.** `store-spec.md`'s normative enum still
+  listed eight values, so the same post was valid to the implementation and
+  invalid to anything reading the spec. Both now list ten.
+
+Two vendor findings were **rejected with reasons**: the `technique`/`history`
+values themselves (15 real pages across two harnesses, and §9.3 already listed
+`technique`), and the nearest-first concatenation (the ranker reorders
+*after* sorting — a grounded contradiction sinks a post below a weaker match by
+position, which `(field, body)` cannot express). codex's counter-proposal —
+compute supersession per anchor, then merge on the ranker's full key — is a
+valid alternative and is recorded as an open design question rather than
+silently decided.
+
+And two claims of my own outran the work: `store-spec` said "this machine no
+anchor holds a wiki page" without the *live* qualifier (a Drive backup of
+another machine holds 35), and asserted omp's wiki clause was already retired
+while that release was still in flight. Both corrected.
+
+Correcting §9.3 the first time also **over-corrected**: the four `wiki/` rows
+were repointed at `community/posts/`, but §9.3 is `migrate-om-store.sh`'s
+mapping table and a file move cannot mint a post id. That target would have
+produced unreadable files in `posts/` and left the converter with no
+`community/wiki/` to read. The rows are back to `community/wiki/`, now labelled
+**staging only**: an anchor with pages still there is mid-migration.
 
 ### Notes
 - `--ascend` is opt-in for the same reason `--weight-metadata` is: on by

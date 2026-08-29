@@ -1565,3 +1565,97 @@ class AnchorAscentHomeBoundTest(unittest.TestCase):
             _write_anchor(base, "mount-parent")
             _write_anchor(proj, "project")
             self.assertEqual(self._run(proj, home), ["project", "mount-parent"])
+
+
+class AscentBypassTest(unittest.TestCase):
+    """The cross-model attack's first finding: the HOME bound was on ONE of the
+    two ascents. `_resolve_anchor_roots_for_query` falls back to
+    `find_anchor_root` whenever the strict ascent finds no `.hq/.anchor` at
+    all, so an unanchored subtree under `~` took the unbounded path — the guard
+    was absent for exactly the trees with no anchor of their own."""
+
+    def _with_home(self, home, fn):
+        import os
+        old = os.environ.get("HOME")
+        os.environ["HOME"] = str(home)
+        try:
+            return fn()
+        finally:
+            if old is None:
+                del os.environ["HOME"]
+            else:
+                os.environ["HOME"] = old
+
+    def test_find_anchor_root_also_stops_at_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            above = Path(tmp).resolve()
+            home = above / "home"
+            deep = home / "proj" / "sub"
+            deep.mkdir(parents=True)
+            _write_anchor(above, "above-home")
+            with self.assertRaises(HqError):
+                self._with_home(home, lambda: anchor.find_anchor_root(deep))
+
+    def test_the_query_fallback_path_cannot_reach_past_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            above = Path(tmp).resolve()
+            home = above / "home"
+            deep = home / "proj"
+            deep.mkdir(parents=True)
+            _write_anchor(above, "above-home")
+            _write_post(above, "finding", 1, title="Someone else's post")
+            with self.assertRaises(HqError):
+                self._with_home(home, lambda: verbs.query(deep, keyword="post"))
+
+    def test_the_bound_is_identity_not_string_equality(self):
+        """`Path` compares strings, so a differently-cased or symlinked route to
+        the same directory never equalled `$HOME` and the loop ran to `/`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            home = base / "home"
+            proj = home / "proj"
+            proj.mkdir(parents=True)
+            link = base / "home-link"
+            link.symlink_to(home)
+            _write_anchor(base, "above-home")
+            _write_anchor(proj, "project")
+            got = self._with_home(link, lambda: [a.id for a in anchor.find_anchors(proj)])
+            self.assertEqual(got, ["project"])
+
+
+class QueryPostIdAscendTest(unittest.TestCase):
+    """`--ascend` handed back `{"id": "finding/001", "anchor": "outer"}` and
+    then `--post-id finding/001` raised "does not exist" — the flag returned a
+    result its own follow-up could not open."""
+
+    def _two(self, tmp):
+        outer = Path(tmp) / "outer"
+        inner = outer / "inner"
+        inner.mkdir(parents=True)
+        _write_anchor(outer, "outer-anchor")
+        _write_anchor(inner, "inner-anchor")
+        _write_post(outer, "handoff", 1, title="Only In The Outer Store")
+        return inner
+
+    def test_post_id_finds_a_parent_anchor_post_under_ascend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inner = self._two(tmp)
+            got = verbs.query(inner, post_id="handoff/001", ascend=True)["post"]
+            self.assertEqual(got["title"], "Only In The Outer Store")
+            self.assertEqual(got["anchor"], "outer-anchor")
+            self.assertIn("body", got)
+
+    def test_without_ascend_it_stays_on_the_nearest_and_says_so(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inner = self._two(tmp)
+            with self.assertRaises(HqError) as e:
+                verbs.query(inner, post_id="handoff/001")
+            self.assertIn("--ascend", str(e.exception))
+
+    def test_the_nearest_anchor_wins_when_both_hold_the_same_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inner = self._two(tmp)
+            _write_post(inner, "handoff", 1, title="The Local One")
+            got = verbs.query(inner, post_id="handoff/001", ascend=True)["post"]
+            self.assertEqual(got["title"], "The Local One")
+            self.assertEqual(got["anchor"], "inner-anchor")

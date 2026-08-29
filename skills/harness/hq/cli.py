@@ -115,7 +115,13 @@ def build_parser() -> argparse.ArgumentParser:
                               "keyword matches (off by default -- see rank.py)")
     query_p.add_argument("--ascend", action="store_true",
                          help="opt-in: search every anchor the ascent reaches, not "
-                              "just the nearest; each result carries its `anchor`")
+                              "just the nearest; each result carries its `anchor`. "
+                              "Applies to --keyword, --post-id, and the "
+                              "filter-only form. --subject already walks the "
+                              "whole chain without it (canonical + shadowed). "
+                              "--post-id resolves nearest-first, because an id "
+                              "is unique only within one anchor and "
+                              "`finding/007` exists in most of them")
 
     sub.add_parser("index")
     sub.add_parser("lint")

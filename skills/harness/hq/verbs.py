@@ -85,9 +85,21 @@ def _post_to_dict(p: Post) -> dict:
     }
 
 
+_ISO_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
 def post_new(anchor_root, *, category, title, author, summary, body, harness="omo",
              to="all", subject=None, supersedes=None, topic=None, confidence="medium",
              status="none", verified=None, keywords=(), project=None, now):
+    # `date` shares its bullet with `author`, `harness` and `to`, joined by
+    # " \u00b7 ". A caller passing a `now` that already contains that separator
+    # writes those keys itself: a migrated page whose `date:` read
+    # "2026-08-07 \u00b7 author: someone-else" forged the author line and lint
+    # passed it, because lint checks the vocabulary of fields and not the shape
+    # of a date. The other bullet-sharing values reach here from a closed
+    # vocabulary; this one is free text from a file.
+    if not _ISO_DATE_ONLY.match(str(now)):
+        raise HqError(f"date must be YYYY-MM-DD, got {now!r}")
     if topic is not None and topic not in TOPICS:
         raise HqError(f"unknown topic {topic!r}; expected one of {TOPICS}")
     if confidence not in CONFIDENCES:
@@ -313,14 +325,38 @@ def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
     roots = _resolve_anchor_roots_for_query(start)
 
     if post_id is not None:
-        post = read_post(roots[0], post_id)
+        # `--ascend` reaches here too, because without it the flag hands you a
+        # result you cannot then open: a keyword query with `--ascend` returns
+        # `{"id": "finding/007", "anchor": "outer"}`, and `--post-id finding/007`
+        # without ascent looked only at the nearest anchor and raised
+        # "does not exist". A post id is unique only WITHIN an anchor, so the
+        # ascent order decides: nearest first, and the answer names the anchor
+        # it came from so a same-numbered post elsewhere is never mistaken for it.
+        search = roots if ascend else roots[:1]
+        post, found_root = None, None
+        for root in search:
+            try:
+                post = read_post(root, post_id)
+                found_root = root
+                break
+            except HqError:
+                continue
+        if post is None:
+            raise HqError(
+                f"post {post_id!r} not found in "
+                + (f"{len(search)} anchor(s) on the ascent" if ascend
+                   else f"the nearest anchor ({roots[0]}) — try --ascend")
+            )
         # The body rides along on this path and this path only. `--post-id` asks
         # for one named post in full, so withholding its body forced the one
         # consumer that needed it (omx's `wiki read`) to open the file and
         # re-split the header itself -- a second parser for the format this
         # store exists to have exactly one of. A keyword query still omits
         # bodies: 125 of them in one response is a different question.
-        return {"post": {**_post_to_dict(post), "body": post.body}}
+        out = {**_post_to_dict(post), "body": post.body}
+        if ascend:
+            out["anchor"] = _resolve_anchor_id(found_root)
+        return {"post": out}
 
     if subject is not None:
         per_anchor = []

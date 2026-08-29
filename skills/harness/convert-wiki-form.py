@@ -53,31 +53,70 @@ from hq.store import community_dir, list_posts  # noqa: E402
 DROP_FIELDS = frozenset({
     "sources", "links", "schemaVersion", "qualityScore", "qualityReasons",
 })
+# A dropped field is dropped because it was measured EMPTY or constant, not
+# because its name is on a list. `plan` records any that carry a real value so
+# `apply` can refuse rather than discard somebody's data on another store.
+_EMPTY = frozenset({"", "[]", "{}", "none", "null", "0", "100"})
 # Tool-generated or meta pages: `hq index` regenerates INDEX.md, and a wiki
 # README documents a form that no longer exists.
 SKIP_NAMES = frozenset({"index.md", "INDEX.md", "README.md"})
 
 _ISO = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 _H1 = re.compile(r"^#(?!#)\s+(.+?)\s*$", re.M)
+_FENCE = re.compile(r"^\s*(```|~~~)")
+
+
+def _strip_fenced(text: str) -> str:
+    """Blank out fenced code blocks, keeping line count so offsets still line up.
+
+    A shell or Python comment (`# do the thing`) inside a fence matches the H1
+    pattern exactly. Without this the converter took a code comment as the post
+    title AND deleted that line from inside the snippet on the way out.
+    """
+    out, in_fence = [], False
+    for line in text.split("\n"):
+        if _FENCE.match(line):
+            in_fence = not in_fence
+            out.append("")
+            continue
+        out.append("" if in_fence else line)
+    return "\n".join(out)
+
+
+def find_h1(body: str):
+    """The first real markdown H1, or None. Never one inside a code fence."""
+    return _H1.search(_strip_fenced(body))
 
 
 def parse_page(path: Path) -> tuple:
     """(frontmatter dict, body text). No PyYAML: `---` fences, `key: value`
-    split on the first colon. A page with no fences is all body."""
+    split on the first colon. A page with no fences is all body.
+
+    Both fences must be a LINE that is exactly `---`. `text.find("\n---")` was
+    the first cut and it matched the first three dashes anywhere -- including a
+    `---` inside a fenced code block, or a YAML document separator in an
+    example. Everything above that point was then read as frontmatter, its
+    colon-less lines silently dropped, and the prose deleted from the body that
+    `apply` writes. The page is `git rm`ed afterwards, so the loss is permanent.
+    """
     text = path.read_text(encoding="utf-8")
-    if not text.startswith("---"):
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
         return {}, text
-    end = text.find("\n---", 3)
-    if end == -1:
+    end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end = i
+            break
+    if end is None:
         return {}, text
     fm = {}
-    for line in text[3:end].split("\n"):
+    for line in lines[1:end]:
         if ":" not in line:
             continue
         k, _, v = line.partition(":")
         fm[k.strip()] = v.strip()
-    rest = text[end + len("\n---"):]
-    return fm, rest.lstrip("\n")
+    return fm, "\n".join(lines[end + 1:]).lstrip("\n")
 
 
 def derive_verified(text: str):
@@ -111,9 +150,16 @@ def plan(anchor: Path) -> dict:
     entries, drops, refusals = [], [], []
     for page in sorted(wiki.rglob("*.md")):
         rel = page.relative_to(wiki)
-        if page.name in SKIP_NAMES:
+        if page.name in SKIP_NAMES and len(rel.parts) == 1:
             drops.append({"path": str(rel), "reason": "tool-generated or meta page"})
             continue
+        if page.name in SKIP_NAMES:
+            # A README one level down is a sub-category guide somebody wrote,
+            # not the store's own index — `convention/writing-guide/README.md`
+            # is a real page in a real store. Dropping by basename alone
+            # `git rm`ed it without converting it. Nested ones go through the
+            # normal path and need the same judgment fields as any other page.
+            pass
         # The category axis is the immediate parent directory. A page sitting
         # directly in wiki/ has none -- omp's store is flat by construction
         # (`omp_content_audit.lint_wiki` globs `wiki/*.md`), so this is a real
@@ -126,7 +172,7 @@ def plan(anchor: Path) -> dict:
             })
             continue
         fm, body = parse_page(page)
-        h1 = _H1.search(body)
+        h1 = find_h1(body)
         text = page.read_text(encoding="utf-8")
         entries.append({
             "path": str(rel),
@@ -135,8 +181,22 @@ def plan(anchor: Path) -> dict:
             "verified": derive_verified(text),
             "keywords": derive_keywords(fm),
             "dropped_fields": sorted(set(fm) & DROP_FIELDS),
+            "dropped_nonempty": {k: fm[k] for k in sorted(set(fm) & DROP_FIELDS)
+                                 if fm[k].strip().lower() not in _EMPTY},
+            # Lifted to the top level, because `apply` reads them from there.
+            # They used to sit only inside `kept_fields`, which `apply` never
+            # opens -- so every page's own `confidence:` was recorded in the
+            # plan, looked preserved, and reached the post as "none". Measured:
+            # 26 of 26 pages in the real backup tree carried one.
+            "confidence": fm.get("confidence"),
+            "status": fm.get("status"),
+            "summary": fm.get("summary"),
+            "project": fm.get("project"),
+            "harness": fm.get("harness"),
             "kept_fields": {k: v for k, v in fm.items()
-                            if k not in DROP_FIELDS and k not in ("title", "tags")},
+                            if k not in DROP_FIELDS
+                            and k not in ("title", "tags", "date", "confidence",
+                                          "status", "summary", "project", "harness")},
             "title": h1.group(1) if h1 else None,
             "title_from_h1": bool(h1),
             # judgment — `apply` refuses while any is null
@@ -152,6 +212,15 @@ def plan(anchor: Path) -> dict:
 
 def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
     data = json.loads(plan_path.read_text(encoding="utf-8"))
+    # Both sides resolved: on macOS `/var` is a symlink to `/private/var`, so a
+    # caller that passed an unresolved path compared unequal to its own plan.
+    anchor = anchor.resolve()
+    if Path(data.get("anchor", "")).resolve() != anchor:
+        # `wiki` is an absolute path from whichever anchor `plan` ran against.
+        # Trusting it while writing posts into a different anchor copies one
+        # store's content into another and removes the first store's pages.
+        raise SystemExit(
+            f"plan was made for anchor {data.get('anchor')!r}, not {anchor} — refusing")
     wiki = Path(data["wiki"])
     entries = data["entries"]
 
@@ -164,6 +233,50 @@ def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
         print("refusing — the plan still has judgment fields unfilled:", file=sys.stderr)
         for m in missing:
             print(f"  {m}", file=sys.stderr)
+        return 2
+    dupes = {}
+    for e in entries:
+        dupes.setdefault(e["subject"], []).append(e["path"])
+    collided = {k: v for k, v in dupes.items() if len(v) > 1}
+    if collided:
+        # Two pages with one subject silently DESTROYED the second one: the
+        # first minted the post, the second hit the already-converted guard,
+        # landed in `skipped`, and `skipped` was folded into the `git rm` list.
+        # A page removed without a post is the one outcome this tool exists to
+        # make impossible, so the collision is refused before anything is written.
+        print("refusing — two or more pages share a subject:", file=sys.stderr)
+        for subj, paths in sorted(collided.items()):
+            print(f"  {subj!r}: {', '.join(paths)}", file=sys.stderr)
+        return 2
+    missing_topic = [e["path"] for e in entries if not e.get("topic")]
+    if missing_topic:
+        # A flat `wiki/*.md` tree (omp's shape) has no category directory, so
+        # `plan` cannot derive a topic and leaves it null. `post_new` accepts
+        # None and writes a post with no `topic:` line, which `hq lint` then
+        # reports as legacy-schema. Refusing puts the choice where it belongs.
+        print("refusing — these pages have no topic (flat tree: fill it in the plan):",
+              file=sys.stderr)
+        for pth in missing_topic:
+            print(f"  {pth}", file=sys.stderr)
+        return 2
+    carrying = [(e["path"], e["dropped_nonempty"]) for e in entries
+                if e.get("dropped_nonempty")]
+    if carrying:
+        print("refusing — these pages carry a value in a field this tool drops. "
+              "It is on the drop list because it measured empty or constant on the "
+              "stores censused, which is not true here:", file=sys.stderr)
+        for pth, fields in carrying:
+            print(f"  {pth}: {fields}", file=sys.stderr)
+        return 2
+    undated = [e["path"] for e in entries if not (e.get("date") or e.get("verified"))]
+    if undated:
+        # `now=` fell back to the literal "unknown", and the ranker's date
+        # tiebreaker is a STRING compare: "unknown" > "2026-08-30" is True, so
+        # every undated post floated above every dated one on a score tie.
+        print("refusing — these pages have neither a date nor a derivable "
+              "verified date; set `date` in the plan:", file=sys.stderr)
+        for pth in undated:
+            print(f"  {pth}", file=sys.stderr)
         return 2
     if data.get("refusals"):
         print("refusing — the plan carries unresolved refusals; edit or remove them:",
@@ -180,7 +293,7 @@ def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
     # resumable instead of destructive.
     existing_subjects = {p.subject for p in list_posts(anchor) if p.subject}
 
-    created, skipped = [], []
+    created, skipped, created_paths = [], [], []
     for e in entries:
         if e["subject"] in existing_subjects:
             skipped.append(e["path"])
@@ -201,13 +314,14 @@ def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
             status=e.get("status") or "none",
             verified=e.get("verified"), keywords=e["keywords"],
             project=e.get("project"),
-            now=e.get("date") or e.get("verified") or "unknown",
+            now=e.get("date") or e["verified"],
         )
         # Byte-for-byte: the conversion moves a form, it does not edit prose.
         written = verbs.read_post(anchor, res["id"])
         if written.body.strip() != body.strip():
             raise SystemExit(f"{e['path']}: body changed on write — refusing to continue")
         created.append((e["path"], res["id"]))
+        created_paths.append((e["path"], res["path"]))
         existing_subjects.add(e["subject"])
         print(f"{e['path']} -> {res['id']}")
 
@@ -219,8 +333,29 @@ def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
     if skipped:
         print(f"\n{len(skipped)} page(s) were already converted and were not re-created")
     if commit:
-        subprocess.run(["git", "rm", "-q", "--", *removed], cwd=anchor, check=True)
-        print(f"git rm: {len(removed)} page(s)")
+        # `--ignore-unmatch` because a page can be untracked (written this
+        # session, or in a store whose `wiki/` was never added). Plain `git rm`
+        # exits 128 on the first such file and leaves the rest in place, so a
+        # half-removed tree looked like a crash rather than a partial run.
+        r = subprocess.run(["git", "rm", "-q", "--ignore-unmatch", "--", *removed],
+                           cwd=anchor, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SystemExit(f"git rm failed: {r.stderr.strip()}")
+        left = [f for f in removed if Path(f).exists()]
+        for f in left:                       # untracked: git rm ignored them
+            Path(f).unlink()
+        print(f"git rm: {len(removed) - len(left)} tracked, "
+              f"{len(left)} untracked page(s) removed")
+        # Stage the posts too. `git rm` stages only the deletions, so a commit
+        # made right after recorded the originals disappearing and nothing
+        # arriving -- the posts sat untracked under `?? .hq/community/`.
+        made = sorted({str(Path(res).parent) for _, res in created_paths} |
+                      {str(community_dir(anchor) / "INDEX.md")})
+        a = subprocess.run(["git", "add", "--", *made], cwd=anchor,
+                           capture_output=True, text=True)
+        if a.returncode != 0:
+            raise SystemExit(f"git add failed: {a.stderr.strip()}")
+        print(f"git add: {len(created_paths)} post(s) + INDEX.md staged")
     else:
         print(f"\n{len(removed)} page(s) left in place — rerun with --commit to `git rm` them")
     return 0

@@ -42,6 +42,9 @@ def _fill(plan: dict) -> dict:
     for i, e in enumerate(plan["entries"]):
         e["category"] = "finding"
         e["subject"] = f"subject-{i}"
+        e.setdefault("date", None)
+        if not e["date"] and not e["verified"]:
+            e["date"] = "2026-08-30"
     return plan
 
 
@@ -197,3 +200,99 @@ class ApplyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApplyRefusalTest(unittest.TestCase):
+    """The three refusals that came out of the cross-model attack on r7's
+    first cut. Each one was a silent data loss or a silent wrong answer."""
+
+    def _page(self, t, rel="convention/a.md", text="# Title A\n\nbody\n"):
+        tmp = _anchor(Path(t))
+        _page(tmp, rel, text)
+        return tmp
+
+    def test_two_pages_sharing_a_subject_are_refused_before_anything_is_written(self):
+        """The first page minted a post, the second hit the already-converted
+        guard, landed in `skipped` — and `skipped` was folded into the `git rm`
+        list. The second page was deleted without ever becoming a post."""
+        with tempfile.TemporaryDirectory() as t:
+            tmp = _anchor(Path(t))
+            _page(tmp, "convention/a.md", "# A\n\nbody a\n")
+            _page(tmp, "convention/b.md", "# B\n\nbody b\n")
+            plan = cwf.plan(tmp)
+            for e in plan["entries"]:
+                e["category"], e["subject"], e["date"] = "finding", "same", "2026-08-30"
+            path = _write_plan(tmp, plan)
+            self.assertEqual(cwf.apply(tmp, path, commit=False), 2)
+            self.assertEqual(store.list_posts(tmp), [])
+
+    def test_a_flat_tree_page_is_refused_rather_than_written_without_a_topic(self):
+        """omp's store is flat (`wiki/*.md`), so there is no category directory
+        to read a topic from. `post_new` accepts None and writes a post with no
+        `topic:` line, which `hq lint` then calls legacy-schema."""
+        with tempfile.TemporaryDirectory() as t:
+            tmp = self._page(t, rel="loose.md")
+            plan = cwf.plan(tmp)
+            self.assertIsNone(plan["entries"][0]["topic"])
+            path = _write_plan(tmp, _fill(plan))
+            self.assertEqual(cwf.apply(tmp, path, commit=False), 2)
+            self.assertEqual(store.list_posts(tmp), [])
+
+    def test_an_undated_page_is_refused_because_unknown_outsorts_every_date(self):
+        """`now=` fell back to the literal "unknown", and the ranker's date
+        tiebreaker is a string compare: `"unknown" > "2026-08-30"` is True."""
+        self.assertGreater("unknown", "2026-08-30")   # the arithmetic itself
+        with tempfile.TemporaryDirectory() as t:
+            tmp = self._page(t, text="# T\n\nno date anywhere in this body\n")
+            plan = cwf.plan(tmp)
+            self.assertIsNone(plan["entries"][0]["verified"])
+            for e in plan["entries"]:
+                e["category"], e["subject"] = "finding", "s"
+            path = _write_plan(tmp, plan)
+            self.assertEqual(cwf.apply(tmp, path, commit=False), 2)
+
+
+class ParsePageBoundaryTest(unittest.TestCase):
+    def test_a_dash_rule_inside_a_code_fence_is_not_the_frontmatter_end(self):
+        """`text.find("\\n---")` matched the first three dashes ANYWHERE, so a
+        YAML example inside a fence ended the frontmatter and every prose line
+        above it was dropped — then the page was `git rm`ed."""
+        with tempfile.TemporaryDirectory() as t:
+            tmp = _anchor(Path(t))
+            pg = _page(tmp, "convention/a.md",
+                       "---\ntags: x\n---\n\n# T\n\nkeep this prose.\n\n"
+                       "```yaml\na: 1\n---\nb: 2\n```\n")
+            fm, body = cwf.parse_page(pg)
+            self.assertEqual(fm, {"tags": "x"})
+            self.assertIn("keep this prose.", body)
+            self.assertIn("b: 2", body)
+
+    def test_a_page_that_opens_with_a_horizontal_rule_is_all_body(self):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = _anchor(Path(t))
+            pg = _page(tmp, "convention/a.md", "---\n\nnot frontmatter at all\n")
+            fm, body = cwf.parse_page(pg)
+            self.assertEqual(fm, {})
+            self.assertIn("not frontmatter at all", body)
+
+    def test_a_comment_inside_a_code_fence_is_not_the_title(self):
+        """`# do the thing` in a shell snippet matches the H1 pattern exactly.
+        It became the post title AND was deleted from inside the snippet."""
+        with tempfile.TemporaryDirectory() as t:
+            tmp = _anchor(Path(t))
+            _page(tmp, "convention/a.md",
+                  "```bash\n# run the build\nmake\n```\n\n# Real Title\n\nbody\n")
+            e = cwf.plan(tmp)["entries"][0]
+            self.assertEqual(e["title"], "Real Title")
+
+    def test_a_nested_readme_is_content_not_a_dropped_meta_page(self):
+        """`convention/writing-guide/README.md` is a real page in a real store.
+        Skipping by basename `git rm`ed it without converting it."""
+        with tempfile.TemporaryDirectory() as t:
+            tmp = _anchor(Path(t))
+            _page(tmp, "README.md", "# store readme\n")
+            _page(tmp, "convention/writing-guide/README.md", "# Guide\n\nbody\n")
+            plan = cwf.plan(tmp)
+            self.assertEqual([d["path"] for d in plan["drops"]], ["README.md"])
+            self.assertEqual([e["path"] for e in plan["entries"]],
+                             ["convention/writing-guide/README.md"])

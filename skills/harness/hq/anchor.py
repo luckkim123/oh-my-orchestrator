@@ -53,6 +53,31 @@ def parse_anchor(path: Path) -> str:
     return value
 
 
+def _home_key():
+    """(st_dev, st_ino) of the home directory, or None when it cannot be read.
+
+    Not `Path.home()` compared with `==`: `Path` compares strings, so on a
+    case-insensitive filesystem a cwd entered as `/Users/Name/p` never equals a
+    `$HOME` of `/Users/name`, and the bound silently stops binding. Identity is
+    the property the guard actually means.
+    """
+    try:
+        st = Path.home().resolve().stat()
+    except (OSError, RuntimeError):
+        return None
+    return (st.st_dev, st.st_ino)
+
+
+def _is_home(d: Path, home_key) -> bool:
+    if home_key is None:
+        return False
+    try:
+        st = d.stat()
+    except OSError:
+        return False
+    return (st.st_dev, st.st_ino) == home_key
+
+
 def find_anchors(start: Path) -> list:
     """Ascent from start.resolve() through every parent, nearest first. One
     Anchor per directory carrying a parseable .hq/.anchor. An unparseable
@@ -74,15 +99,12 @@ def find_anchors(start: Path) -> list:
     """
     anchors: list = []
     cur = start.resolve()
-    try:
-        home = Path.home().resolve()
-    except (OSError, RuntimeError):
-        home = None
+    home_key = _home_key()
     for d in [cur, *cur.parents]:
         anchor_file = d / ANCHOR_REL
         if anchor_file.is_file():
             anchors.append(Anchor(root=d, id=parse_anchor(anchor_file)))
-        if home is not None and d == home:
+        if _is_home(d, home_key):
             break
     return anchors
 
@@ -120,11 +142,21 @@ def find_anchor_root(start: Path) -> Path:
     parseable .hq/.anchor and would raise HqError for both; a strict
     anchor-only default would make every `hq` command fail against the two
     stores this package ships against today.
+
+    The home bound applies here too. It has to: `_resolve_anchor_roots_for_query`
+    falls back to this function whenever the strict ascent finds no
+    `.hq/.anchor` at all, so an unanchored subtree under `~` took this path and
+    walked straight past home to `/`. Bounding only the strict ascent left the
+    guard in place for anchored trees and absent for exactly the trees that had
+    no anchor of their own to protect them.
     """
     cur = start.resolve()
+    home_key = _home_key()
     for d in [cur, *cur.parents]:
         if (d / ANCHOR_REL).is_file() or has_legacy_store(d):
             return d
+        if _is_home(d, home_key):
+            break
     raise HqError(f"no .hq anchor or legacy store found ascending from {start}")
 
 
