@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-08-29 — the board gets a front door
+
+### Added
+- **`skills/community` — the board's operating surface, as its own skill.** Reading
+  before deciding, posting what was settled, commenting on someone else's record,
+  and correcting one that is wrong. Category choice, subject chains, and the rule
+  that nothing here is deleted.
+
+  It replaces the wiki rather than sitting beside it. A wiki page was a state and a
+  post is an event; the merge kept both — the page's taxonomy became `topic:`, its
+  staleness banner became `verified:`, and "what is true now" became the head of a
+  `subject:` chain. Measured the same day: `.hq/community/wiki/` holds **0 files on
+  all seven stores** on this machine, while the posts hold 116 (vault) and 17
+  (claudebase). There was no data to migrate — only a missing front door.
+
+  The extraction is also what makes the rules reachable by a vendor worker.
+  `omo/references/vendor-ops.md` measures `harness/SKILL.md` at 28,261 characters,
+  1.8x the whole `--skills` budget, so the board's rules could never be passed to
+  one. The `community` card is under 6,000 and fits.
+
+### Fixed
+- **`hq post` produced a post its own `hq lint` warned about.** `Post.is_legacy`
+  reads a missing `verified:` as pre-schema, and `post_new` wrote the field only
+  when `--verified` was given — so every post created through the supported writer
+  without that flag was flagged `legacy-schema` the moment it was written. It now
+  writes `verified: none`, the same explicit-absence idiom `supersedes`, `status`,
+  and `confidence` already use, and which all 116 live vault posts already carry.
+
+  Found by running the new skill's own documented examples against a fresh anchor
+  rather than by a failing test. The live stores never hit it: their posts were
+  either filled by the migration script or written with `--verified` by hand.
+
+### Changed
+- `harness/SKILL.md`'s `## The hq store CLI` section is now a pointer. The verb
+  table, flags, and usage rules live in `community`; the design SSOT
+  (`references/store-spec.md`) stays with `harness`.
+
 ## [0.9.1] - 2026-08-29 — the index drifts everywhere the verbs are not
 
 ### Added

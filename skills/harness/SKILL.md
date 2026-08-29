@@ -28,36 +28,26 @@ Executable protocol enabling any agent task to run continuously across multiple 
 
 ## The `hq` store CLI
 
-`hq` is the supported writer for the post store. **Use it instead of hand-writing post
-files** — a hand-written file drifts from the schema, and `hq lint` is the only thing
-that catches that before it reaches another machine.
+**The operating surface moved to the `community` skill** (0.10.0). Every verb — `post`,
+`comment`, `edit`, `query`, `index`, `lint`, `gc` — its flags, and the rules for using
+them live there. `hq` is the only supported writer for the post store; a hand-written
+post drifts from the schema and `hq lint` is the only thing that catches it.
 
-Every plugin's `bin/` is on `PATH`, so the command is bare `hq` (0.5.0+). It resolves
-its anchor by ascending from the working directory to the nearest one holding
-`.hq/.anchor` or a legacy `.orchestration/` store; `--anchor <path>` overrides. The
-global flags `--anchor`, `--json`, and `--version` come *before* the verb.
+The extraction is not cosmetic. This card is 28,000+ characters, which
+`omo/references/vendor-ops.md` measures at 1.8x the whole `--skills` budget, so a vendor
+worker could never be handed the board's operating rules. The `community` card is under
+6,000 and fits.
 
-| Verb | What it does |
-|:---|:---|
-| `hq post --category C --title T --author A --summary S --body-file F` | Create a post. The number is assigned tree-globally, so `finding/007` is followed by `decision/008`. Optional: `--project` `--subject` `--supersedes` `--topic` `--confidence` `--status` `--verified` `--keywords` `--to` `--harness` |
-| `hq comment <post-id> --author A --text T` | Append one comment. Never rewrites an existing line |
-| `hq edit <post-id> --author A --reason R --body-file F` | Replace a post body, recording who and why |
-| `hq query [--subject S] [--post-id ID] [--keyword K] [--project P] [--harness H] [--topic T] [--status S]` | Read. `--subject` resolves the canonical post for that subject and names the ones it shadows. `--project` and `--harness` are the two independent axes that replaced per-project anchors (store-spec §2); with no filter the answer is **everything**, because invisibility was the failure that rule fixed |
-| `hq index` | Rewrite `INDEX.md` from the posts on disk |
-| `hq lint` | Schema check across the store. Run before committing |
-| `hq gc [--stale-days N]` | Report-only (default 180 days): posts whose `status: resolved` or `verified:` date has gone stale, and superseded chains. Removes nothing |
+The design SSOT stays here: `references/store-spec.md` — the four layers, the post
+schema, and the anchor rules.
 
-`--body-file -` reads the body from stdin.
-
-The design SSOT is `references/store-spec.md` — the four layers, the post schema, and
-the anchor rules. This table is only the operating surface.
-
-> **The binding layer is still missing.** Nothing in a `PreToolUse` hook names `hq`, so
-> this section is advisory and a session under momentum can still hand-write a post.
-> Two tools in this project already died that exact way — `tokensave` (6 MCP calls
-> against 10,813 tool calls) and `graphify`'s MCP server (0 calls in 30 days), both
-> because the nudge layer named something else. Wiring a guard that names `hq` is
-> tracked as P6.
+> **The binding layer is still weak.** The `community` skill is a routing layer, not an
+> enforcing one; nothing in a `PreToolUse` hook names `hq`, so a session under momentum
+> can still hand-write a post. Two tools in this project died exactly there —
+> `tokensave` (6 MCP calls against 10,813 tool calls) and `graphify`'s MCP server (0
+> calls in 30 days), both because the nudge layer named something else. Wiring a guard
+> that names `hq` is tracked as P6, and should be measured for firing rate before it
+> blocks anything.
 
 ## Activation Gate
 

@@ -53,6 +53,7 @@ are in progress.
 | `skills/orchestrator` | Explicit entry point for a multi-vendor campaign. Composes the two below |
 | `skills/omo` | Role-scoped vendor orchestration and the delegation gate |
 | `skills/harness` | The enforcement layer: blocking checks, safety valve, claim locks |
+| `skills/community` | The board: reading, writing, commenting on, and correcting posts through `hq` |
 | `templates/orchestration/` | Seeds a project's `.hq/` shared knowledge store |
 | `templates/vendor/` | Vendor-side loader configs, so a worker reads the store on every task |
 

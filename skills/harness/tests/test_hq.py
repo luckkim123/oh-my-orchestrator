@@ -472,6 +472,34 @@ class ProjectFieldTest(unittest.TestCase):
             self.assertEqual(verbs.lint(root)["errors"], [])
 
 
+class VerifiedDefaultTest(unittest.TestCase):
+    """`is_legacy` reads a missing `verified:` as pre-schema. So a post the
+    supported writer produced without `--verified` warned on its own `hq lint`
+    the moment it was written -- measured 2026-08-29 against a fresh anchor."""
+
+    def test_post_without_verified_is_not_flagged_legacy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "one-repo")
+            verbs.post_new(root, category="finding", title="T", author="t",
+                           summary="s", body="b", subject="a-subject",
+                           topic="debugging", now="2026-08-29")
+            written = (root / ".hq/community/posts/finding/001-t.md").read_text("utf-8")
+            self.assertIn("verified: none", written)
+            warns = verbs.lint(root)["warnings"]
+            self.assertFalse([w for w in warns if "legacy-schema" in w], warns)
+
+    def test_explicit_verified_is_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "one-repo")
+            verbs.post_new(root, category="finding", title="T", author="t",
+                           summary="s", body="b", verified="2026-08-29 (against 0.10.0)",
+                           now="2026-08-29")
+            written = (root / ".hq/community/posts/finding/001-t.md").read_text("utf-8")
+            self.assertIn("verified: 2026-08-29 (against 0.10.0)", written)
+
+
 class IndexDriftTest(unittest.TestCase):
     """`hq post` reindexes inside the write lock, so the verb path never drifts.
     Everything else does -- a heredoc, a rename, a `git rm`, a migration script --

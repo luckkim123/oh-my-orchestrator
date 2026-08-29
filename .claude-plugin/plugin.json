@@ -1,6 +1,6 @@
 {
   "name": "oh-my-orchestrator",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Multi-vendor orchestration harness. The Claude session executes; vendor CLIs advise by role on a tracked .hq/community/ board with enforcement on SubagentStop.",
   "author": {
     "name": "kimseungmin"
@@ -19,7 +19,8 @@
   "skills": [
     "./skills/orchestrator/",
     "./skills/omo/",
-    "./skills/harness/"
+    "./skills/harness/",
+    "./skills/community/"
   ],
   "hooks": {
     "Stop": [

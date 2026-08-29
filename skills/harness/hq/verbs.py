@@ -111,8 +111,12 @@ def post_new(anchor_root, *, category, title, author, summary, body, harness="om
             fields["topic"] = topic
         fields["confidence"] = confidence
         fields["status"] = status
-        if verified is not None:
-            fields["verified"] = verified
+        # `none` rather than an absent line: `is_legacy` treats a missing `verified`
+        # as pre-schema, so omitting it made every post the supported writer produced
+        # without `--verified` warn on its own `hq lint` the moment it was written.
+        # Same idiom as `supersedes`/`status`/`confidence` — the explicit absence of a
+        # verification, not the claim of one.
+        fields["verified"] = verified if verified is not None else "none"
         if keywords:
             fields["keywords"] = ", ".join(keywords)
         fields["summary"] = summary
