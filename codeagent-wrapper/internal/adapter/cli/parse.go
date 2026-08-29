@@ -126,6 +126,24 @@ func BuildSingleConfig(cmd *cobra.Command, args []string, rawArgv []string, opts
 	switch {
 	case agentFlagChanged && modelFlagChanged && LastFlagIndex(rawArgv, "agent") > LastFlagIndex(rawArgv, "model"):
 		model = strings.TrimSpace(resolvedModel)
+	case !modelFlagChanged && agentName != "" && backendFlagChanged && backendName != resolvedBackend:
+		// The caller moved this role to a different vendor. A role's model is a
+		// name in ITS vendor's namespace, so inheriting it here ships e.g.
+		// `codex e --model claude-opus-5` — an HTTP 400 on codex, and on agy a
+		// silent wrong-model run with nothing to notice. Empty is the safe
+		// value: every backend appends --model only when it is non-empty
+		// (codex.go, gemini.go, agy.go, opencode.go), so the vendor CLI falls
+		// back to its own default. That is exactly what omo's SKILL.md already
+		// tells callers to expect from `--backend codex` with no `--model`;
+		// until now the implementation did the opposite.
+		//
+		// backendName was already settled by the backend switch above, so when
+		// `--agent` came LAST it equals resolvedBackend and the role keeps its
+		// model — the role won the backend too, and inheriting is then correct.
+		// Scoped to agentName != "": whether a model configured in settings
+		// should survive a backend switch is a separate question, and this
+		// branch deliberately does not answer it.
+		model = ""
 	case !modelFlagChanged && agentName != "":
 		model = strings.TrimSpace(resolvedModel)
 	case !modelFlagChanged:

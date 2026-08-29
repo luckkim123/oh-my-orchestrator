@@ -2,6 +2,78 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.0] - 2026-08-29 — the vendor lane could not change vendors, and nobody could see it
+
+### Fixed
+- **`--backend <other>` no longer carries the role's model across vendors**
+  (`codeagent-wrapper/internal/adapter/cli/parse.go`). The backend and the model
+  were settled by two switches that did not know about each other: `--backend`
+  moved the call to codex, and the model switch then took the *role card's* model
+  because `--model` was absent. So `--agent oracle --backend codex` built
+  `codex e --model claude-opus-5 …` and died with **HTTP 400, exit 1, 14s** — the
+  exact invocation omo's own `SKILL.md` prescribes for the adversarial-review
+  ground ("override with `--backend codex` and no `--model`"). The documentation
+  was not wrong; the behaviour it described did not exist.
+
+  The new branch fires only when a role is in play, `--backend` was passed, and
+  the effective backend differs from the role's own, and it sets the model to the
+  empty string. Empty is the correct value rather than a fallback: every backend
+  appends `--model` only when it is non-empty (`codex.go:55`, and the same shape
+  in `gemini.go`, `agy.go`, `opencode.go`), so the vendor CLI picks its own
+  default. Declaring `--agent` *after* `--backend` is unaffected — the later
+  `--agent` wins the backend too, so nothing mismatches and the role keeps its
+  model.
+
+  **The `agy` case is the one that mattered most and showed least.** Codex
+  answered a wrong model name with a 400. `agy` answered with a completed run at
+  the wrong model and no error anywhere, which silently defeats the reason the
+  override exists: a judge that did not author the work.
+
+  Four table-driven cases pin it in `internal/app/main_test.go`
+  (`TestBackendParseArgs_BackendSwitchDoesNotInheritRoleModel`) — switch drops the
+  model, no switch keeps it, explicit `--model` still wins, `--agent` last keeps it.
+
+### Added
+- **`bin/omo-consult` — a vendor consultation you can watch.** The wrapper has
+  zero lines of tmux/pane code, so a consultation was an invisible child process
+  and the only observable was whatever the session pasted back. This is a thin
+  POSIX-sh launcher (no Go change) that runs the same call in a panel: an Orca tab
+  when `orca worktree current` succeeds, a detached `tmux split-window -d` when
+  `$TMUX` is set, and the current foreground behaviour otherwise. Forced with
+  `--surface`.
+
+  All three surfaces `tee` to the **same** output file and the launcher prints its
+  path, so the machine-side recovery path does not change — only the human-side
+  surface is added. `--focus` is opt-in on every surface: a consultation must not
+  steal focus from the work that asked for it.
+
+  `orca worktree current`, not `command -v orca`, is the detection test. Orca can
+  be installed while the current directory is not a registered worktree, and
+  `terminal create --worktree active` fails there; measured in this repo, which is
+  exactly that case, and the launcher fell through as designed.
+
+### Changed
+- `skills/omo/references/vendor-ops.md`: documents the backend-override behaviour
+  above (including "if your build predates the fix, keep passing `--model`"), the
+  new launcher, and the `--prompt-file` path restriction.
+
+  That restriction is **narrower than it looks**, and what is written there is the
+  measured version rather than the one first drafted: it binds the *role card's*
+  `prompt_file`, which must resolve under `~/.claude` or `~/.codeagent/agents`; a
+  path passed with `--prompt-file` or set in settings is flagged explicit and is
+  not restricted at all. And a refusal is a hard error
+  (`failed to read prompt file: …`), not a fallback to stdin
+  (`internal/app/app.go:91`, `internal/app/task_runtime_adapter.go:73`).
+
+### Notes
+- **The Go fix does not ship with this version bump.** The plugin cache carries
+  `codeagent-wrapper/` as *source*; the binary that actually runs is whatever sits
+  on `PATH`. Updating the plugin gets you the launcher, the docs and the source —
+  the fixed behaviour requires `make build` in `codeagent-wrapper/` and putting the
+  result on `PATH`. Verified here by hash: the pre-existing
+  `~/.local/bin/codeagent-wrapper` differed from a fresh build before it was
+  replaced.
+
 ## [0.11.0] - 2026-08-29 — a correction that cannot reach the summary is not a correction
 
 ### Added

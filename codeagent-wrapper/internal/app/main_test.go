@@ -1355,6 +1355,83 @@ func TestBackendParseArgs_PromptFileOverridesAgent(t *testing.T) {
 	}
 }
 
+// A role's model belongs to its OWN vendor's namespace. Moving the role to
+// another backend with --backend must not carry that name across: measured
+// 2026-08-29, `--agent oracle --backend codex` (oracle is claude-bound) built
+// `codex e --model claude-opus-5 …` and died with HTTP 400 in 14s. On the agy
+// backend the same leak produces no error at all — it just runs the wrong
+// model, which is worse, because the whole point of the override is getting a
+// judge that did NOT author the work.
+func TestBackendParseArgs_BackendSwitchDoesNotInheritRoleModel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Cleanup(config.ResetModelsConfigCacheForTest)
+	config.ResetModelsConfigCacheForTest()
+
+	configDir := filepath.Join(home, ".codeagent")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "models.json"), []byte(`{
+  "agents": {
+    "oracle": { "backend": "claude", "model": "claude-opus-5" }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		args        []string
+		wantModel   string
+		wantBackend string
+	}{
+		{
+			name:        "backend switch drops the role's model",
+			args:        []string{"codeagent-wrapper", "--agent", "oracle", "--backend", "codex", "task"},
+			wantModel:   "", // empty => the vendor CLI picks its own default
+			wantBackend: "codex",
+		},
+		{
+			name:        "no backend switch keeps the role's model",
+			args:        []string{"codeagent-wrapper", "--agent", "oracle", "task"},
+			wantModel:   "claude-opus-5",
+			wantBackend: "claude",
+		},
+		{
+			name:        "explicit model still wins over the switch",
+			args:        []string{"codeagent-wrapper", "--agent", "oracle", "--backend", "codex", "--model", "gpt-5.6-terra", "task"},
+			wantModel:   "gpt-5.6-terra",
+			wantBackend: "codex",
+		},
+		{
+			name: "agent declared last wins the backend, so it keeps its model",
+			args: []string{"codeagent-wrapper", "--backend", "codex", "--agent", "oracle", "task"},
+			// The backend switch already hands the role its own backend here;
+			// no mismatch is left, so inheriting the model is correct.
+			wantModel:   "claude-opus-5",
+			wantBackend: "claude",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Args = tt.args
+			cfg, err := parseArgs()
+			if err != nil {
+				t.Fatalf("parseArgs() unexpected error: %v", err)
+			}
+			if cfg.Model != tt.wantModel {
+				t.Fatalf("Model = %q, want %q", cfg.Model, tt.wantModel)
+			}
+			if cfg.Backend != tt.wantBackend {
+				t.Fatalf("Backend = %q, want %q", cfg.Backend, tt.wantBackend)
+			}
+		})
+	}
+}
+
 func TestBackendParseArgs_OutputFlag(t *testing.T) {
 	tests := []struct {
 		name    string

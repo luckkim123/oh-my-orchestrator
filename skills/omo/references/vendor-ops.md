@@ -20,6 +20,28 @@ hand-roll the CLI call:
 | Effort tier on claude | `backend/claude.go` -- emitted as `--effort <v>` | `--reasoning-effort <tier>` |
 | Backend + model selection | `config.json` `modules.omo.agents.<role>` | `--agent <role>`, or override with `--backend` / `--model` |
 | Prompt delivery | stdin (`-`) or `--prompt-file` | the Context Pack heredoc |
+| Watching a call in a panel | `bin/omo-consult` -- Orca tab / tmux split / foreground | `--role`, `--workdir`, `--prompt <file>` |
+
+**A backend override drops the role's model, and that is the point.**
+`--agent oracle --backend codex` sends no `--model` at all, so codex picks its own
+default. Until 2026-08-29 it did the opposite -- the model switch in
+`adapter/cli/parse.go` never looked at whether `--backend` had moved the role off
+its own vendor, so `oracle` (claude-bound) built `codex e --model claude-opus-5 …`
+and died with HTTP 400 in 14s. Measured twice; passing `--model gpt-5.6-terra`
+explicitly was the only thing that worked. On the `agy` backend the same leak
+threw no error at all, which is worse: the adversarial-review ground exists to get
+a judge that did not author the work, and a silent wrong-model run defeats it with
+nothing to notice. If your build predates that fix, keep passing `--model`.
+Declaring `--agent` *after* `--backend` still hands the role both its backend and
+its model -- the later `--agent` wins the backend, so no mismatch is left to break.
+
+**The prompt-file path restriction binds the role card, not your flag.** A
+`prompt_file` coming from the role (default `~/.codeagent/agents/<name>.md`) must
+resolve under `~/.claude` or `~/.codeagent/agents`; anything else is refused with
+`prompt file must be under ~/.claude or ~/.codeagent/agents` and the run **fails**
+-- there is no stdin fallback. A path you pass on the command line with
+`--prompt-file`, or set in settings, is marked explicit and is not restricted at
+all (`app.go:91` `readAgentPromptFile`, guarded by `PromptFileExplicit`).
 
 Flags the wrapper accepts, verified against `--help` on a build of this repo
 (2026-08-27): `--agent`, `--backend`, `--model`, `--reasoning-effort`,

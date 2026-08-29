@@ -1,0 +1,123 @@
+#!/bin/sh
+# omo-consult — run one vendor consultation where a human can watch it.
+#
+# `codeagent-wrapper` has zero lines of tmux/pane code, so a consultation is an
+# invisible child process: the only trace is whatever the session pastes back.
+# This puts the same call in a visible panel when the environment has one, and
+# changes nothing about how the result is recovered — all three surfaces tee to
+# the SAME output file, so the session still reads a file either way.
+#
+#   omo-consult --role oracle --backend codex --workdir . --prompt pack.md
+#
+# Surfaces, in order of preference:
+#   orca   `orca` on PATH and this worktree registered  -> a tab in Orca
+#   tmux   $TMUX set                                     -> a detached split
+#   none   otherwise                                     -> foreground, as today
+#
+# Focus is never stolen: --focus is opt-in on every surface.
+#
+# POSIX sh only. Exits non-zero only when the launch itself fails; a vendor
+# error surfaces in the output file, which is where you were going to look.
+set -eu
+
+usage() {
+    cat >&2 <<'USAGE'
+usage: omo-consult --role <name> --workdir <dir> --prompt <file>
+                   [--backend <b>] [--model <m>] [--effort <tier>]
+                   [--out <file>] [--surface orca|tmux|none] [--focus]
+
+  --role      agent role passed to codeagent-wrapper --agent
+  --workdir   the wrapper's positional workdir
+  --prompt    file holding the Context Pack (a big pack must NOT go through a TUI)
+  --out       where to tee vendor output (default: mktemp, path printed on stdout)
+  --surface   force one surface instead of auto-detecting
+  --focus     bring the new panel to the front (default: do not steal focus)
+USAGE
+    exit 2
+}
+
+role=""; workdir=""; prompt=""; backend=""; model=""; effort=""
+out=""; surface=""; focus=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --role)    role=${2:?--role needs a value}; shift 2 ;;
+        --workdir) workdir=${2:?--workdir needs a value}; shift 2 ;;
+        --prompt)  prompt=${2:?--prompt needs a value}; shift 2 ;;
+        --backend) backend=${2:?--backend needs a value}; shift 2 ;;
+        --model)   model=${2:?--model needs a value}; shift 2 ;;
+        --effort)  effort=${2:?--effort needs a value}; shift 2 ;;
+        --out)     out=${2:?--out needs a value}; shift 2 ;;
+        --surface) surface=${2:?--surface needs a value}; shift 2 ;;
+        --focus)   focus=1; shift ;;
+        -h|--help) usage ;;
+        *) printf 'omo-consult: unknown argument %s\n' "$1" >&2; usage ;;
+    esac
+done
+
+[ -n "$role" ] && [ -n "$workdir" ] && [ -n "$prompt" ] || usage
+[ -f "$prompt" ] || { printf 'omo-consult: no such prompt file: %s\n' "$prompt" >&2; exit 1; }
+command -v codeagent-wrapper >/dev/null 2>&1 || {
+    printf 'omo-consult: codeagent-wrapper is not on PATH — it ships as Go source, so run `make build` in codeagent-wrapper/ and put the binary on PATH.\n' >&2
+    exit 1
+}
+[ -n "$out" ] || out=$(mktemp "${TMPDIR:-/tmp}/omo-${role}-XXXXXX")
+
+# Build the wrapper argv as one shell string: every surface below runs it via
+# `sh -c`, and only a string survives Orca's --command and tmux's split.
+q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+cmd="codeagent-wrapper --agent $(q "$role")"
+[ -n "$backend" ] && cmd="$cmd --backend $(q "$backend")"
+# No --model unless asked. Since the backend-mismatch fix, omitting it on a
+# backend override is what hands the vendor CLI its own default model; carrying
+# the role's model across vendors is the bug that produced HTTP 400 on codex.
+[ -n "$model" ] && cmd="$cmd --model $(q "$model")"
+[ -n "$effort" ] && cmd="$cmd --reasoning-effort $(q "$effort")"
+cmd="$cmd - $(q "$workdir") < $(q "$prompt") 2>&1 | tee $(q "$out")"
+
+detect_surface() {
+    [ -n "$surface" ] && { printf '%s' "$surface"; return; }
+    # `orca worktree current` is the real test, not `command -v orca`: Orca can
+    # be installed while THIS directory is not a registered worktree, and
+    # `terminal create --worktree active` fails on an unregistered one.
+    if command -v orca >/dev/null 2>&1 && orca worktree current >/dev/null 2>&1; then
+        printf 'orca'
+    elif [ -n "${TMUX:-}" ]; then
+        printf 'tmux'
+    else
+        printf 'none'
+    fi
+}
+
+surface=$(detect_surface)
+
+case "$surface" in
+    orca)
+        set -- terminal create --worktree active \
+               --title "omo:${role}${backend:+(${backend})}" \
+               --command "$cmd" --json
+        [ "$focus" -eq 1 ] && set -- "$@" --focus
+        orca "$@" || {
+            printf 'omo-consult: orca launch failed; rerun with --surface none\n' >&2
+            exit 1
+        }
+        ;;
+    tmux)
+        # -d keeps focus in the current pane; drop it only when asked.
+        if [ "$focus" -eq 1 ]; then
+            tmux split-window -- sh -c "$cmd"
+        else
+            tmux split-window -d -- sh -c "$cmd"
+        fi
+        ;;
+    none)
+        sh -c "$cmd"
+        ;;
+    *)
+        printf 'omo-consult: unknown surface %s\n' "$surface" >&2
+        exit 2
+        ;;
+esac
+
+printf '%s\n' "$out"
