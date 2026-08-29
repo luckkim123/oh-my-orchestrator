@@ -24,6 +24,7 @@ post's raw_prefix_lines stays valid across both mutations. Assigning
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -46,6 +47,15 @@ STATUSES = ("none", "needs-experiment", "needs-apply-before-retrain", "resolved"
 # key must not be listed, or the key after it is swallowed. store-spec section 4
 # puts `summary:` alone on its own bullet, which is what makes it safe.
 REST_OF_LINE_KEYS = ("summary",)
+
+# PLAN B3. A review comment is a comment whose text opens with one of these in
+# brackets. Three values, not a free-form verdict: `confirmed` and
+# `contradicted` are what a reader needs before using a post as an answer, and
+# `superseded` is the one case where the right response is a pointer rather
+# than a judgement. "helpful"/"agree" are deliberately absent -- PLAN 2.2(c):
+# in a store most of whose posts one model wrote, a reaction is self-approval,
+# and a count of them carries less than one sentence saying why.
+REVIEW_ASSESSMENTS = ("confirmed", "contradicted", "superseded")
 
 _COMMENTS_MARKER = "## Comments"
 
@@ -254,6 +264,75 @@ _TEMPLATE_LINES = [
     ("summary",),
 ]
 _TEMPLATE_KEYS = {k for line in _TEMPLATE_LINES for k in line}
+
+
+def parse_review(entry: str, post_author: str = "") -> dict:
+    """The review carried by one comment block, or None if it carries none.
+
+    Line-anchored on purpose. The frontmatter's ` · ` separator is not reused
+    here: comment text is prose, prose contains that separator, and a
+    seam-crossing split is exactly the defect class this file already carries
+    two guards against (see set_field_in_raw). So `scope:` and `evidence:`
+    are their own continuation lines and nothing has to be split.
+
+        - (2026-08-29, reviewer) [contradicted] the §3 claim does not hold
+          scope: the "every tier" claim in §3, table 14
+          evidence: `omx report-parse ...` -> 0.527 N*m, commit 1062dc2
+
+    `counted` is the gate PLAN 7 asks for -- an ungrounded review is not
+    counted. Two ways to fail it, and the reason is carried rather than
+    dropped, because a review that silently does not count is worse than no
+    review at all: the writer believes the post was checked.
+    """
+    first, *rest = entry.split("\n")
+    m = re.match(r"\(([^,]+),\s*([^)]*)\)\s*\[([a-z]+)\]\s*(.*)$", first)
+    if not m:
+        return None
+    date, author, assessment, text = (g.strip() for g in m.groups())
+    if assessment not in REVIEW_ASSESSMENTS:
+        return None
+    scope = evidence = ""
+    for line in rest:
+        km = re.match(r"\s*(scope|evidence):\s*(.*)$", line)
+        if km and not (scope if km.group(1) == "scope" else evidence):
+            if km.group(1) == "scope":
+                scope = km.group(2).strip()
+            else:
+                evidence = km.group(2).strip()
+    post_author = (post_author or "").strip()
+    reason = ""
+    if not evidence:
+        reason = "no evidence: line"
+    elif not author:
+        reason = "the review names no reviewer"
+    elif not post_author:
+        reason = "the post names no author, so the reviewer cannot be shown to differ"
+    elif author == post_author:
+        reason = "reviewer is the post's own author"
+    return {
+        "assessment": assessment, "author": author, "date": date,
+        "scope": scope, "evidence": evidence, "text": text,
+        "counted": not reason, "uncounted_reason": reason,
+    }
+
+
+def counted_reviews(p: Post) -> list:
+    """The reviews on a post that count, in file order (PLAN B3).
+
+    Uncounted ones are absent by design -- "an ungrounded review comment is
+    not counted" is the acceptance criterion, and a caller that has to filter
+    them itself is a caller that will forget to. `hq lint` reports them, so
+    they are visible where a mistake gets fixed rather than where an answer
+    gets decided.
+    """
+    author = p.fields.get("author", "")
+    out = []
+    for entry in p.comments:
+        r = parse_review(entry, author)
+        if r and r["counted"]:
+            out.append({k: r[k] for k in
+                        ("assessment", "author", "date", "scope", "evidence")})
+    return out
 
 
 def _build_frontmatter_bullets(fields: dict) -> list:

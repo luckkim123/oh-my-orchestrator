@@ -12,7 +12,8 @@ from .anchor import (
     ANCHOR_REL, HqError, check_id_uniqueness, find_anchor_root, find_anchors,
     parse_anchor,
 )
-from .post import (CONFIDENCES, STATUSES, TOPICS, Post, parse_bullet_line,
+from .post import (CONFIDENCES, REVIEW_ASSESSMENTS, STATUSES, TOPICS, Post,
+                   counted_reviews, parse_bullet_line, parse_review,
                    set_field_in_raw)
 from .rank import field_text, rank
 from .store import (
@@ -80,6 +81,7 @@ def _post_to_dict(p: Post) -> dict:
     return {
         "id": p.id, "title": p.title, "path": str(p.path) if p.path else None,
         "fields": dict(p.fields), "summary": p.fields.get("summary", ""),
+        "reviews": counted_reviews(p),
     }
 
 
@@ -134,14 +136,115 @@ def post_new(anchor_root, *, category, title, author, summary, body, harness="om
     return with_store_lock(anchor_root, _do)
 
 
-def comment(anchor_root, post_id, *, author, text, now):
-    """Append-only: never rewrites an existing comment line."""
+_FORGEABLE = re.compile(r"^\s*(-\s|scope:|evidence:)")
+
+
+def _has_line_break(s: str) -> bool:
+    """True if `s` holds anything the reader will treat as a line break.
+
+    `"\n" in s` is not that test. The store is read back with universal
+    newlines, so a lone `\r` written into a value comes back as a line break --
+    which is how a CR-separated payload walked past a `\n`-only guard and
+    materialised as a counted review by an author nobody invoked (measured
+    2026-08-29, exit 0). `splitlines` splits on strictly more separators than
+    the file reader joins on, and erring toward refusal is the right side here.
+    """
+    return s != "".join(s.splitlines())
+
+
+def _reject_forged_lines(flag: str, value: str) -> None:
+    """Refuse free text that would forge structure once serialized.
+
+    A comment block ends at the next `- ` line and its review fields are read
+    off `scope:`/`evidence:` continuation lines, so a line break inside free
+    text can mint a whole second comment -- including a counted review nobody
+    wrote. This is the B1 defect one layer up: there, a newline in `--summary`
+    forged a frontmatter bullet and walked straight through the `status:` enum
+    gate. Validating one field is worth nothing while another field can forge
+    it.
+    """
+    for line in value.splitlines()[1:]:
+        if _FORGEABLE.match(line):
+            raise HqError(
+                f"{flag} cannot contain a line starting with '- ', 'scope:', or "
+                f"'evidence:' — that would forge a separate comment or a review "
+                f"field; put the continuation on a line that starts otherwise"
+            )
+
+
+def _canonical_author(value: str) -> str:
+    """The author as `parse_review` will read it back, or a refusal.
+
+    Write-time and read-time have to agree on one string. They did not: the
+    write gate compared the raw flag while the parser stripped it, so
+    `--author " test "` on a post by `test` passed the self-review check and
+    was then declined by the parser -- a review written and silently not
+    counted. And `--author "rev)"` closed the `(date, author)` paren early, so
+    the parser saw no review at all. Both are the same defect this codebase
+    keeps re-finding: two readers of one datum under different rules.
+    """
+    a = value.strip()
+    if not a:
+        raise HqError("--author cannot be empty")
+    if _has_line_break(value) or ")" in a or "," in a:
+        raise HqError(
+            f"--author {value!r} cannot contain ')', ',', or a line break — the "
+            f"comment line is `(date, author) …` and those end the field early"
+        )
+    return a
+
+
+def comment(anchor_root, post_id, *, author, text, now,
+            assessment=None, scope=None, evidence=None):
+    """Append-only: never rewrites an existing comment line.
+
+    With `assessment` this writes a *review* (PLAN B3) rather than a remark.
+    All three of scope/evidence/a foreign reviewer are required at write time,
+    rather than written-and-then-ignored: `parse_review` refuses to count a
+    review missing any of them, and minting a record your own gate discards is
+    how a gate ends up looking green while enforcing nothing.
+    """
+    author = _canonical_author(author)
+    _reject_forged_lines("--text", text)
+    if assessment is None:
+        if scope or evidence:
+            raise HqError("--scope/--evidence describe a review; give --assessment too")
+    elif assessment not in REVIEW_ASSESSMENTS:
+        raise HqError(
+            f"unknown assessment {assessment!r}; expected one of {REVIEW_ASSESSMENTS}")
+    else:
+        for flag, v in (("--scope", scope), ("--evidence", evidence)):
+            if not v or not v.strip():
+                raise HqError(f"a review requires a non-empty {flag}")
+            if _has_line_break(v):
+                raise HqError(f"{flag} must be a single line")
+
     def _do():
         post = read_post(anchor_root, post_id)
-        post.comments.append(f"({now}, {author}) {text}")
+        post_author = post.fields.get("author", "").strip()
+        if assessment is not None:
+            if not post_author:
+                raise HqError(
+                    f"{post_id} names no author, so a review of it cannot be shown to "
+                    f"come from anyone else — add author: to the post first"
+                )
+            if author == post_author:
+                raise HqError(
+                    f"{post_id} was written by {author!r} — a review of one's own post "
+                    f"is not counted (PLAN 2.2); comment without --assessment, or have "
+                    f"another session review it"
+                )
+        if assessment is None:
+            entry = f"({now}, {author}) {text}"
+        else:
+            entry = (f"({now}, {author}) [{assessment}] {text}\n"
+                     f"  scope: {scope.strip()}\n"
+                     f"  evidence: {evidence.strip()}")
+        post.comments.append(entry)
         post.has_comments_section = True
         write_post(anchor_root, post)
-        return {"id": post_id, "comment_count": len(post.comments)}
+        return {"id": post_id, "comment_count": len(post.comments),
+                "review": assessment is not None}
 
     return with_store_lock(anchor_root, _do)
 
@@ -150,6 +253,8 @@ def edit(anchor_root, post_id, *, new_body=None, reason, author, now,
          new_summary=None, new_status=None):
     if not reason or not reason.strip():
         raise HqError("edit requires a non-empty reason")
+    _reject_forged_lines("--reason", reason)   # edit appends a comment too
+    author = _canonical_author(author)
     if new_summary is not None and not new_summary.strip():
         raise HqError("edit --summary requires a non-empty value")
     if new_status is not None and new_status not in STATUSES:
@@ -394,6 +499,15 @@ def lint(start):
         s = p.fields.get("status")
         if s is not None and s not in STATUSES:
             errors.append(f"{p.id}: status {s!r} not in {STATUSES}")
+
+    for p in posts:
+        for entry in p.comments:
+            r = parse_review(entry, p.fields.get("author", ""))
+            if r and not r["counted"]:
+                warnings.append(
+                    f"{p.id}: review by {r['author']!r} is not counted — "
+                    f"{r['uncounted_reason']}"
+                )
 
     errors.extend(_index_drift(root, posts))
 

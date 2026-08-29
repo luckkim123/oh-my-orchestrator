@@ -44,6 +44,13 @@ exactly the posts that also carry `confidence`, so it marks a schema generation,
 evidence). Ranking by any of them would sort by when a post was written while
 claiming to sort by how well it is backed.
 
+**A grounded contradiction sinks a post, and you should read that as the gate it is.**
+Before using a post as your answer, look at its `reviews` — `hq query` returns only the
+ones that count. A post carrying a counted `contradicted` review sorts below everything
+else that matched, however well it scored; if you use it anyway, report it as an
+unverified lead, not as what is known. A `confirmed` review buys no rank: a confirm
+count measures attention, not truth, and this board has none yet to calibrate against.
+
 **An empty result is not an answer.** This repo has killed two tools by reading zero as
 absence — `tokensave` (6 calls against 10,813) and graphify's MCP server (0 in 30 days),
 both because nothing routed to them, not because nobody needed them. Same discipline
@@ -68,6 +75,12 @@ hq post --category finding --title "…" --author session \
 EOF
 
 hq comment finding/042 --author reviewer --text "재현 안 됨 — 같은 커밋에서 통과"
+
+# A review, not a remark: it is what `hq query` reports and what moves rank.
+hq comment finding/042 --author reviewer --assessment contradicted \
+        --scope  "§3 의 '전 tier 우위' 주장" \
+        --evidence "pytest -k tier → 2 failed (커밋 1062dc2)" \
+        --text   "tier 2 에서 뒤집힌다"
 hq edit    finding/042 --author session  --reason "measured the opposite" --body-file fix.md
 hq edit    finding/042 --author session  --reason "probe ran, lead closed" --status resolved
 ```
@@ -99,6 +112,25 @@ On a **no-git anchor** `hq edit` refuses outright and tells you to supersede ins
 without git there is no copy of the old body, so an edit would destroy the record. That
 is a property of the anchor, not of the post. **`--status` does not open a door there** —
 on a no-git anchor a status change is still a supersede.
+
+## Reviewing a post — the three fields, and why they are required
+
+`--assessment` is one of `confirmed`, `contradicted`, `superseded`. There is no
+"helpful" and no thumbs: most posts here were written by the same model, so a reaction
+is self-approval, and one sentence saying *why* carries more than any count of them.
+
+A review is **counted** only if it has all of:
+
+| Field | Why it is required |
+|:---|:---|
+| `--evidence` | a reproducible command, output, commit, or measurement. Without it the review is an opinion about a claim, and this board already has the claim |
+| a foreign reviewer | `--author` must differ from the post's `author:`. Author and approver are different passes — the same rule omo's delegation applies to vendors |
+| `--scope` | exactly which claim was checked, because "confirmed" on a post making four claims says nothing |
+
+The verb refuses to write a review missing any of them rather than writing one its own
+gate would discard. Ungrounded reviews still exist in older posts, hand-written; those
+are invisible to `hq query` and `hq lint` names each one, so the drift shows up where
+it gets fixed instead of where an answer gets decided.
 
 ## Which category
 

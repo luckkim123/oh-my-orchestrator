@@ -2,6 +2,111 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.0] - 2026-08-29 — a review without evidence is an opinion
+
+### Added
+- **`hq comment` can write a grounded review** (`--assessment` / `--scope` /
+  `--evidence`), and `hq query` reports the ones that count. This is B3 of the
+  hq-engine-consolidation plan; its acceptance criterion is PLAN §7's "an ungrounded
+  review comment is not counted".
+
+  No new file and no new store layer, per PLAN §2.2 — a review is a comment in the
+  post's own `## Comments` section, with `scope:` and `evidence:` on continuation
+  lines:
+
+  ```
+  - (2026-08-29, reviewer) [contradicted] tier 2 에서 뒤집힌다
+    scope: §3 의 "전 tier 우위" 주장
+    evidence: pytest -k tier → 2 failed (커밋 1062dc2)
+  ```
+
+  **Line-anchored, not ` · `-separated.** The frontmatter's separator is not reused
+  here: comment text is prose, prose contains ` · `, and a seam-crossing split is the
+  exact defect class 0.13.0 and 0.14.0 each shipped a guard against. Nothing has to be
+  split, so nothing can be split wrong.
+
+  A review is **counted** only with a non-empty `evidence:` and a reviewer who is not
+  the post's own `author:` — author and approver are different passes, which is the
+  rule omo already applies to vendors. The verb refuses to write a review missing
+  either rather than minting a record its own gate discards; that is how a gate ends
+  up green while enforcing nothing (`omx` shipped exactly that in 0.11.1).
+
+  Three values only — `confirmed`, `contradicted`, `superseded`. PLAN §2.2(c): in a
+  store most of whose posts one model wrote, a reaction is self-approval, and a count
+  of them carries less than one sentence saying why.
+
+### Changed
+- **A counted `contradicted` review sinks the post in `hq query --keyword`.** It is
+  the one review signal that survives a population of zero: at n=1 it still says
+  someone reproduced the post being wrong, which is what a ranker must not lead with.
+  Sorting is stable, so nothing else moves.
+- **`confirmed` gets no rank bonus**, which is a deliberate deviation from PLAN
+  §2.3-4's "grounded confirms" signal. A confirm count measures attention, not truth,
+  and the store has zero of them to calibrate against — 0.14.0 already refused to
+  weight a field whose population is a proxy for when a post was written. Revisit when
+  confirms exist.
+- **`hq query` results carry `reviews`, on every path** (unlike 0.14.0's `score`,
+  which is keyword-only). Counted reviews only: a caller that has to filter the
+  uncounted ones itself is a caller that will forget to. Additive, so omx
+  `wiki/query.py` — which reads `id`/`title`/`fields` — is unaffected.
+- **`hq lint` names each uncounted review** (warning, not error). The uncounted ones
+  are invisible to query by design, and something has to make them visible where a
+  mistake gets fixed rather than where an answer gets decided.
+
+### Fixed
+- **A newline in `comment --text` or `edit --reason` could forge a whole comment.**
+  A comment block ends at the next `- ` line, so free text carrying one minted a
+  second comment — and once B3 reads `[assessment]` off that line, a counted review
+  nobody wrote. This is 0.13.0's defect one layer up, where a newline in `--summary`
+  forged a frontmatter bullet and walked through the `status:` enum gate. Both flags
+  now refuse a line starting with `- `, `scope:`, or `evidence:`. Validating one field
+  is worth nothing while another field can forge it.
+
+- **Four more in the first B3 draft, found by handing it to codex with "attack it,
+  do not write a patch".** Eight judgments went in; it rejected four, and all four
+  reproduced. They are one root — **the write gate and the parser read `author` under
+  different rules**, which is the third distinct pair of readers in this codebase to
+  disagree about one datum (0.13.0: parser vs mutator; 0.14.0: filter vs ranker):
+
+  | Input | What happened | Exit |
+  |:---|:---|---:|
+  | `--author "rev)"` | closed `(date, author)` early, so the parser saw no review at all — written, invisible | 0 |
+  | `--author " test "` on a post by `test` | write gate compared raw, parser compared stripped: the self-review check passed and the parser then declined to count it | 0 |
+  | `--text "…\r- (…, ghost) [confirmed] forged\r  evidence: fake"` | **a counted review by an author nobody invoked** | 0 |
+  | a post with no `author:` | a review counted without anyone being shown to differ from the author | 0 |
+
+  The carriage return is the worst of them and the reason is worth keeping: `"\n" in s`
+  is not a test for "does this contain a line break". The store is read back with
+  universal newlines, so a lone `\r` is not a line break *going in* and is one *coming
+  out*. `_has_line_break` now asks `s != "".join(s.splitlines())`, and the forgery scan
+  splits the same way.
+
+  `--author` is now canonicalised at write time to exactly what the parser will read —
+  stripped, and refused if it holds `)`, `,`, or a line break, for plain comments as
+  well as reviews. A review of a post with no `author:` is refused rather than counted,
+  and `parse_review` carries "the review names no reviewer" / "the post names no
+  author" as its own uncounted reasons.
+
+### Verification
+- `python3 -m unittest tests.test_hq tests.test_hooks tests.test_paths_lint` —
+  **210 pass** (25 new), exit code read directly, not through a pipe.
+- **Mutation-checked, all five guards.** Disabling the forgery guard fails exactly
+  the three forgery tests; forcing `counted` true fails the three that depend on the
+  gate; removing the sink fails only the sink test; reverting `_has_line_break` to
+  `"\n" in s` fails only the CR-in-evidence test; disabling the author canonicaliser
+  fails exactly the three author tests. One test passed *for the wrong reason* until
+  this was run — `edit --reason` forgery asserted only `HqError`, and with the guard
+  disabled it still raised one from the no-subject path. It now asserts the message.
+- **Live store copy, through `bin/hq`**, re-run after the four fixes: a grounded
+  review on `finding/121` adds **exactly three lines** and nothing else;
+  `hq query --post-id` returns it under `reviews`; a planted evidence-less review is
+  reported by `hq lint` as `not counted — no evidence: line`; and each of
+  `--author "ghost)"`, `--author " omo-consolidation-r2 "` (the post's own author,
+  padded), and a CR-forged `--text` exits **1**.
+- The live store's baseline stays clean: its 9 legacy verdicts are prose
+  ("교차검증 verdict: ok|issues"), not bracketed, so they are not review-shaped and
+  nothing retroactively fails. Migrating them is a separate call, not made here.
+
 ## [0.15.0] - 2026-08-29 — the volume goes out, the decision stays
 
 ### Changed

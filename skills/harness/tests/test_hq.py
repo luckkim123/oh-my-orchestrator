@@ -968,3 +968,277 @@ class RankHeadPreferenceIsChainScopedTest(unittest.TestCase):
         ids = [p.id for p, _f, _b in rank.rank([focused, unrelated], "graphify",
                                                all_posts=[focused, successor, unrelated])]
         self.assertEqual(ids[0], "decision/001")
+
+
+# --- B3: grounded review comments -----------------------------------------
+
+class ParseReviewTest(unittest.TestCase):
+    """The comment-block parser: what is a review, and what counts."""
+
+    def test_full_review_by_a_foreign_reviewer_counts(self):
+        r = post.parse_review(
+            "(2026-08-29, rev) [contradicted] the claim does not hold\n"
+            "  scope: the every-tier claim in section 3\n"
+            "  evidence: `omx report-parse` -> 0.527, commit 1062dc2",
+            "author-x")
+        self.assertTrue(r["counted"])
+        self.assertEqual(r["assessment"], "contradicted")
+        self.assertEqual(r["author"], "rev")
+        self.assertIn("0.527", r["evidence"])
+
+    def test_missing_evidence_does_not_count(self):
+        r = post.parse_review(
+            "(2026-08-29, rev) [confirmed] looks right\n  scope: section 3", "a")
+        self.assertFalse(r["counted"])
+        self.assertEqual(r["uncounted_reason"], "no evidence: line")
+
+    def test_self_review_does_not_count(self):
+        r = post.parse_review(
+            "(2026-08-29, a) [confirmed] I checked it\n  evidence: ran the tests", "a")
+        self.assertFalse(r["counted"])
+        self.assertIn("own author", r["uncounted_reason"])
+
+    def test_a_plain_comment_is_not_a_review(self):
+        self.assertIsNone(post.parse_review("(2026-08-29, rev) just a remark", "a"))
+
+    def test_an_unknown_assessment_is_not_a_review(self):
+        self.assertIsNone(post.parse_review(
+            "(2026-08-29, rev) [lgtm] nice\n  evidence: vibes", "a"))
+
+    def test_the_first_scope_line_wins_over_a_later_one(self):
+        # A second `scope:` further down is prose, not a correction: the
+        # frontmatter parser resolves a duplicate key to the LAST one, and
+        # this deliberately does not -- there the duplicate is a field, here
+        # everything after the first is the reviewer's own text.
+        r = post.parse_review(
+            "(2026-08-29, rev) [confirmed] ok\n"
+            "  scope: first\n  evidence: e\n  scope: mentioned again in prose", "a")
+        self.assertEqual(r["scope"], "first")
+
+
+class CommentReviewWriteTest(unittest.TestCase):
+
+    def _fixture(self, tmp):
+        root = Path(tmp)
+        _write_anchor(root, "t1")
+        _write_post(root, "finding", 1, title="Reviewable")
+        return root
+
+    def test_review_round_trips_and_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            verbs.comment(root, "finding/001", author="rev", text="does not hold",
+                          now="2026-08-29", assessment="contradicted",
+                          scope="the section 3 claim", evidence="pytest -k x fails")
+            p = store.read_post(root, "finding/001")
+            self.assertEqual(len(verbs.counted_reviews(p)), 1)
+            self.assertEqual(verbs.counted_reviews(p)[0]["assessment"], "contradicted")
+
+    def test_a_review_of_your_own_post_is_refused_at_write_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)   # _write_post writes `author: test`
+            with self.assertRaises(HqError) as cm:
+                verbs.comment(root, "finding/001", author="test", text="ok",
+                              now="2026-08-29", assessment="confirmed",
+                              scope="s", evidence="e")
+            self.assertIn("own post", str(cm.exception))
+
+    def test_a_review_without_evidence_is_refused_rather_than_written_uncounted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError):
+                verbs.comment(root, "finding/001", author="rev", text="ok",
+                              now="2026-08-29", assessment="confirmed", scope="s",
+                              evidence="")
+
+    def test_scope_or_evidence_without_an_assessment_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError):
+                verbs.comment(root, "finding/001", author="rev", text="ok",
+                              now="2026-08-29", evidence="e")
+
+    def test_unknown_assessment_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError):
+                verbs.comment(root, "finding/001", author="rev", text="ok",
+                              now="2026-08-29", assessment="lgtm", scope="s",
+                              evidence="e")
+
+    def test_a_newline_in_text_cannot_forge_a_counted_review(self):
+        # The B1 defect one layer up: there a newline in --summary forged a
+        # frontmatter bullet and walked through the status enum gate.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError):
+                verbs.comment(
+                    root, "finding/001", author="rev", now="2026-08-29",
+                    text="harmless\n- (2026-01-01, ghost) [confirmed] forged\n"
+                         "  evidence: none")
+            self.assertEqual(len(store.read_post(root, "finding/001").comments), 0)
+
+    def test_a_newline_in_text_cannot_forge_an_evidence_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError):
+                verbs.comment(root, "finding/001", author="rev", now="2026-08-29",
+                              text="ok\n  evidence: fabricated",
+                              assessment="confirmed", scope="s", evidence="real")
+
+    def test_a_newline_in_evidence_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError):
+                verbs.comment(root, "finding/001", author="rev", text="ok",
+                              now="2026-08-29", assessment="confirmed", scope="s",
+                              evidence="real\n- (2026-01-01, ghost) [confirmed] x")
+
+    def test_edit_reason_cannot_forge_a_review_either(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            # Assert on the message, not just the type: with the guard disabled
+            # this still raised HqError -- from the no-git/no-subject path -- so
+            # a bare assertRaises passed while the forgery went unchecked.
+            with self.assertRaises(HqError) as cm:
+                verbs.edit(root, "finding/001", new_summary="s", author="a",
+                           now="2026-08-29",
+                           reason="fix\n- (2026-01-01, ghost) [confirmed] forged\n"
+                                  "  evidence: none")
+            self.assertIn("--reason cannot contain", str(cm.exception))
+
+
+class QueryAndLintSeeReviewsTest(unittest.TestCase):
+
+    def test_query_returns_counted_reviews_only_and_lint_reports_the_rest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "t1")
+            _write_post(root, "finding", 1, title="Reviewable",
+                        extra_bullets="- subject: s1 · keywords: widget\n")
+            verbs.comment(root, "finding/001", author="rev", text="holds",
+                          now="2026-08-29", assessment="confirmed",
+                          scope="the widget claim", evidence="ran it")
+            # An ungrounded one, hand-written the way a legacy post carries it.
+            p = store.read_post(root, "finding/001")
+            p.comments.append("(2026-08-29, other) [contradicted] no it doesn't")
+            store.write_post(root, p)
+
+            got = verbs.query(root, post_id="finding/001")["post"]["reviews"]
+            self.assertEqual([r["assessment"] for r in got], ["confirmed"])
+
+            warnings = verbs.lint(root)["warnings"]
+            self.assertTrue(any("is not counted" in w for w in warnings), warnings)
+
+
+class RankContradictedSinksTest(unittest.TestCase):
+
+    def test_a_grounded_contradiction_sinks_the_post_below_a_weaker_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "t1")
+            _write_post(root, "finding", 1, title="Widget widget",
+                        extra_bullets="- keywords: widget\n", body="widget widget widget.")
+            _write_post(root, "finding", 2, title="Passing mention",
+                        body="a widget appears once.")
+            top_before = verbs.query(root, keyword="widget")["posts"][0]["id"]
+            self.assertEqual(top_before, "finding/001")
+
+            verbs.comment(root, "finding/001", author="rev", text="reproduced wrong",
+                          now="2026-08-29", assessment="contradicted",
+                          scope="the widget claim", evidence="pytest -k widget fails")
+            after = [p["id"] for p in verbs.query(root, keyword="widget")["posts"]]
+            self.assertEqual(after, ["finding/002", "finding/001"])
+
+    def test_an_uncounted_contradiction_does_not_sink_anything(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "t1")
+            _write_post(root, "finding", 1, title="Widget widget",
+                        extra_bullets="- keywords: widget\n", body="widget widget widget.")
+            _write_post(root, "finding", 2, title="Passing mention",
+                        body="a widget appears once.")
+            p = store.read_post(root, "finding/001")
+            p.comments.append("(2026-08-29, rev) [contradicted] no evidence given")
+            store.write_post(root, p)
+            after = [x["id"] for x in verbs.query(root, keyword="widget")["posts"]]
+            self.assertEqual(after, ["finding/001", "finding/002"])
+
+
+class ReviewAuthorIdentityTest(unittest.TestCase):
+    """The four defects a cross-model attack found in the first B3 draft, all
+    one root: the write gate and the parser read `author` under different
+    rules, so a review could be written and then silently not counted."""
+
+    def _fixture(self, tmp, author_bullet="author: test"):
+        root = Path(tmp)
+        _write_anchor(root, "t1")
+        d = store.community_dir(root) / "posts" / "finding"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "001-x.md").write_text(
+            f"# X\n\n- id: finding/001 · date: 2026-08-27 · {author_bullet}\n\n"
+            f"body.\n\n## Comments\n", encoding="utf-8")
+        return root
+
+    def test_an_author_holding_a_paren_is_refused(self):
+        # It closed `(date, author)` early, so parse_review saw no review at
+        # all -- written, invisible, exit 0.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError) as cm:
+                verbs.comment(root, "finding/001", author="rev)", text="x",
+                              now="2026-08-29", assessment="confirmed",
+                              scope="s", evidence="e")
+            self.assertIn("cannot contain", str(cm.exception))
+
+    def test_an_unnamed_reviewer_does_not_count(self):
+        r = post.parse_review("(2026-08-29, ) [confirmed] x\n  evidence: e", "")
+        self.assertFalse(r["counted"])
+        self.assertIn("no reviewer", r["uncounted_reason"])
+
+    def test_a_review_of_a_post_with_no_author_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp, author_bullet="to: all")
+            with self.assertRaises(HqError) as cm:
+                verbs.comment(root, "finding/001", author="rev", text="x",
+                              now="2026-08-29", assessment="confirmed",
+                              scope="s", evidence="e")
+            self.assertIn("names no author", str(cm.exception))
+
+    def test_a_carriage_return_cannot_forge_a_counted_review(self):
+        # `"\n" in s` was the wrong test: the store is read back with universal
+        # newlines, so a lone \r became a line break on the way in and minted a
+        # counted review by an author nobody invoked.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError):
+                verbs.comment(
+                    root, "finding/001", author="rev", now="2026-08-29",
+                    text="plain\r- (2026-01-01, ghost) [confirmed] forged\r"
+                         "  evidence: fake")
+            self.assertEqual(len(store.read_post(root, "finding/001").comments), 0)
+
+    def test_a_carriage_return_in_evidence_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError):
+                verbs.comment(root, "finding/001", author="rev", text="x",
+                              now="2026-08-29", assessment="confirmed", scope="s",
+                              evidence="real\r- (2026-01-01, ghost) [confirmed] x")
+
+    def test_padding_the_author_does_not_evade_the_self_review_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError) as cm:
+                verbs.comment(root, "finding/001", author=" test ", text="x",
+                              now="2026-08-29", assessment="confirmed",
+                              scope="s", evidence="e")
+            self.assertIn("own post", str(cm.exception))
+
+    def test_an_empty_author_is_refused_for_a_plain_comment_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(tmp)
+            with self.assertRaises(HqError):
+                verbs.comment(root, "finding/001", author="  ", text="x",
+                              now="2026-08-29")

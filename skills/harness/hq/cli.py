@@ -16,11 +16,11 @@ import sys
 from pathlib import Path
 
 try:
-    from . import __version__, verbs
+    from . import __version__, post, verbs
     from .anchor import HqError, find_anchor_root
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from hq import __version__, verbs
+    from hq import __version__, post, verbs
     from hq.anchor import HqError, find_anchor_root
 
 
@@ -83,6 +83,13 @@ def build_parser() -> argparse.ArgumentParser:
     comment_p.add_argument("post_id")
     comment_p.add_argument("--author", required=True)
     comment_p.add_argument("--text", required=True)
+    comment_p.add_argument("--assessment", default=None,
+                           help=f"make this a review: one of {post.REVIEW_ASSESSMENTS}"
+                                f" (requires --scope and --evidence)")
+    comment_p.add_argument("--scope", default=None,
+                           help="exactly which claim was checked")
+    comment_p.add_argument("--evidence", default=None,
+                           help="a reproducible command, output, commit, or measurement")
 
     edit_p = sub.add_parser("edit")
     edit_p.add_argument("post_id")
@@ -147,7 +154,9 @@ def main(argv=None) -> int:
         if args.verb == "comment":
             root = _resolve_anchor(args)
             result = verbs.comment(
-                root, args.post_id, author=args.author, text=args.text, now=_now_date()
+                root, args.post_id, author=args.author, text=args.text,
+                now=_now_date(), assessment=args.assessment, scope=args.scope,
+                evidence=args.evidence,
             )
             _print(result, args.json)
             return 0

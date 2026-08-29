@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 from collections import Counter
 
+from .post import counted_reviews
+
 _LATIN = re.compile(r"[a-z0-9À-ɏ]+")
 _CJK = re.compile(r"[぀-ヿ一-鿿가-힯]+")
 
@@ -144,4 +146,15 @@ def rank(posts, keyword: str, *, all_posts=None) -> list:
         p.id in superseded,
         pos[p.id],
     ))
+
+    # A counted `contradicted` review sinks the post (PLAN B3). It is the one
+    # review signal that survives having a population of zero: at n=1 it still
+    # says "someone reproduced this being wrong", which is exactly what a
+    # ranker should not lead with. `confirmed` gets NO bonus, which PLAN 2.3-4
+    # provisions -- a confirm count measures attention, the store has none of
+    # them yet to calibrate against, and B2 already refused to weight a field
+    # whose population is a proxy for when a post was written. Revisit once
+    # confirms exist. Sorting is stable, so everything else keeps its order.
+    ordered.sort(key=lambda p: any(
+        r["assessment"] == "contradicted" for r in counted_reviews(p)))
     return [(p, score_of[p.id][0], score_of[p.id][1]) for p in ordered]

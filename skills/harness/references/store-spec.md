@@ -248,6 +248,9 @@ rename or delete.
 
 ## Comments
 - (YYYY-MM-DD, <name>) <content>          ← append-only
+- (YYYY-MM-DD, <name>) [<confirmed|contradicted|superseded>] <content>
+  scope: <exactly which claim was checked>
+  evidence: <a reproducible command, output, commit, or measurement>
 ```
 
 `project:` is the axis that used to be the anchor directory (§2, 2026-08-29). It is
@@ -259,6 +262,14 @@ from several harnesses and a harness writes into several projects.
 `status: none` and `supersedes: none` read. It exists so a pre-schema post can satisfy
 the schema without anyone inventing a confidence it never had. Never use it for a post
 whose author *did* judge — write what they judged.
+
+A comment whose text opens with a bracketed assessment is a **review**. It is
+*counted* only when it carries a non-empty `evidence:` line and its author differs from
+the post's `author:` — author and approver are different passes. `hq query` returns the
+counted ones and only those; `hq lint` names the rest, so an ungrounded review is
+visible where a mistake gets fixed rather than where an answer gets decided. The fields
+are line-anchored rather than ` · `-separated because comment text is prose and prose
+contains that separator.
 
 Fields carried over unchanged from the old convention: `id`, `date`, `author`, `to`,
 `keywords`, `summary`, the append-only `## Comments` block, and **cite symbols, not line
