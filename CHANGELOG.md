@@ -2,6 +2,79 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.0] - 2026-08-29 — the weights come back, as a flag, on the tier that breaks ties
+
+### Added
+- **`body` on `hq query --post-id`**, and on that path only. Asking for one named
+  post and withholding its body forced the one consumer that needed it (omx's
+  `wiki read`) to open the file and re-split the header itself — a second parser
+  for the format this store exists to have exactly one of. A keyword query still
+  omits bodies: 125 of them in one response is a different question.
+- **`hq query --weight-metadata`** — opt-in, off by default. It lets `confidence:`
+  and `status:` re-order keyword matches, using omx's own
+  `_CONFIDENCE_WEIGHT`/`_STATUS_WEIGHT` maps carried over verbatim from
+  `wiki/query.py`. This is what unblocks B4: omx's reader moves onto this ranker
+  and would otherwise silently lose a signal its experiment trees are built to fill.
+
+  **Opt-in is the whole design.** 0.14.0 refused these weights outright, and that
+  refusal still holds for this store: `confidence` is absent on 77 of 122 posts,
+  `status` on 113, and `verified:` marks exactly the same 45 posts as `confidence` —
+  so on *this* store the fields record which schema generation a post was written
+  under, not how well it is backed. A caller whose store fills them can ask; nobody
+  gets them by accident.
+
+  **It weighs the body tier and then sits below it as its own tier — two
+  corrections, in opposite directions.** omx could multiply its single blended
+  score because a 20x better body match still beat a 0.56 discount, which is
+  exactly the contract its docstring states ("re-orders NEAR-tied scores while a
+  clearly-stronger keyword match still wins"). This ranker's key is tiered and
+  sorted lexicographically, so a discount on the FIRST tier is unrecoverable by
+  the ones below it: applied there, `status: resolved` alone dropped a post with
+  twenty keyword matches below one with a single mention — a veto, not a nudge.
+  Moving it to the body tier alone then made it inert exactly where it was
+  needed, because `b * w` is 0 for every weight when `b` is 0: two posts matching
+  on their fields alone — the common case for a short, well-tagged store — tied
+  at zero and fell through to the accidental tiebreakers, with `resolved`
+  sometimes leading. So the weight scales the body tier AND breaks its ties. The
+  first error was caught by a test written before the implementation; the second
+  by a cross-model review after it.
+
+  Absence is neutral in both maps, never a penalty — a post that never set
+  `confidence` must not sink below one that set it to `low` — and `none`, this
+  store's explicit-absence sentinel, weighs the same as a missing field.
+
+  The returned `score` is the **weighted** number under the flag, not the raw match.
+  Handing back a raw score under a weighted order would let a caller that re-sorts by
+  it produce a different order than the list it was handed; two readers of one number
+  disagreeing about the rule is the defect class this plan has now hit four rounds
+  running.
+
+### Fixed
+- **`hq query --keyword` returned nothing for a multi-word query whose terms sat
+  in different fields.** The filter tested the whole query string as a substring
+  of one field while the ranker scored per token, so `--keyword "gpu memory"`
+  found zero posts against one with `keywords: gpu, memory` and both words in
+  its body. Membership is now the ranker's own verdict —
+  `score_post(p, keyword) == (0, 0)` — which deletes the second rule instead of
+  correcting it for a fourth time (the first three: a joined field string
+  inventing phrases, `subject` carrying a weight no query could reach,
+  `keywords: none` matching here and scoring zero there). On the vault's store,
+  `--keyword "graphify 색인"` goes from 0 posts to 19.
+
+### Verification
+- 223 tests pass (210 before, 13 added).
+- Eight mutations, each caught by at least one test: flag ignored (3 fail);
+  weight applied to the field tier, i.e. the veto bug (2); the weight tier
+  removed so body-only weighting returns (1); the `none` sentinel weighted as a
+  penalty (1); absence penalised below `low` (2); raw scores returned under a
+  weighted order (1); the keyword filter reverted to whole-string substring (1).
+- Reviewed adversarially by a model from another family (`--backend agy`), which
+  is what surfaced the inert-weight case and the multi-word filter bug. It also
+  argued three judgements were wrong; two were (both above), one was not.
+- Live, on the vault's 125-post store: `--keyword 랭킹 --weight-metadata` sinks
+  `finding/122` (`status: resolved`) below `decision/118` (`status: none`), which the
+  default ordering ranks the other way.
+
 ## [0.16.0] - 2026-08-29 — a review without evidence is an opinion
 
 ### Added

@@ -15,7 +15,7 @@ from .anchor import (
 from .post import (CONFIDENCES, REVIEW_ASSESSMENTS, STATUSES, TOPICS, Post,
                    counted_reviews, parse_bullet_line, parse_review,
                    set_field_in_raw)
-from .rank import field_text, rank
+from .rank import rank, score_post
 from .store import (
     INDEX_NAME, community_dir, list_posts, list_posts_with_errors, next_number,
     read_post, update_index, with_store_lock, write_post,
@@ -303,7 +303,7 @@ def edit(anchor_root, post_id, *, new_body=None, reason, author, now,
 
 
 def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
-          topic=None, status=None, project=None):
+          topic=None, status=None, project=None, weight_metadata=False):
     # An empty keyword is not "match everything" — `"" in hay` is always true
     # and `body.count("")` returns len(body)+1, so the query would come back
     # with every post ordered longest-first while looking like a search.
@@ -313,7 +313,13 @@ def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
 
     if post_id is not None:
         post = read_post(roots[0], post_id)
-        return {"post": _post_to_dict(post)}
+        # The body rides along on this path and this path only. `--post-id` asks
+        # for one named post in full, so withholding its body forced the one
+        # consumer that needed it (omx's `wiki read`) to open the file and
+        # re-split the header itself -- a second parser for the format this
+        # store exists to have exactly one of. A keyword query still omits
+        # bodies: 125 of them in one response is a different question.
+        return {"post": {**_post_to_dict(post), "body": post.body}}
 
     if subject is not None:
         per_anchor = []
@@ -351,20 +357,17 @@ def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
 
     def matches(p):
         if keyword is not None:
-            # Per field, never a joined string. Joining invents phrases that
-            # exist in no field: with `keywords: contention` and
-            # `summary: measured`, the join reads "contention measured" and the
-            # post matched a phrase it does not contain — then outranked one
-            # that does, because the ranker reads the fields separately.
-            # These are exactly the fields rank.py weighs, read through the
-            # same function it reads them with. They diverged twice more while
-            # this was written: `subject` carried a weight no query could reach
-            # because it was missing here, and `keywords: none` matched here
-            # while scoring zero there. A field counts for both or for neither.
-            needle = keyword.lower()
-            fields = [p.title, p.body] + [field_text(p, k)
-                                          for k in ("keywords", "summary", "subject")]
-            if not any(needle in f.lower() for f in fields):
+            # Membership IS the ranker's own score, not a second rule that
+            # happens to agree. Every earlier attempt to state it separately
+            # diverged: joining the fields invented phrases in no field;
+            # `subject` carried a weight no query could reach; `keywords: none`
+            # matched here while scoring zero there. The last one survived all
+            # three fixes -- a whole-string substring test drops a multi-word
+            # query whose terms live in different fields, so `--keyword "gpu
+            # memory"` returned nothing against a post with `keywords: gpu,
+            # memory` and both words in its body. Asking the ranker removes the
+            # second rule instead of correcting it again.
+            if score_post(p, keyword) == (0, 0):
                 return False
         if harness is not None and p.fields.get("harness") != harness:
             return False
@@ -384,7 +387,8 @@ def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
     # order, so `--keyword graphify` led with a post that mentions graphify once
     # in passing while the post *about* graphify sat tenth.
     out = []
-    for post, field_score, body_score in rank(selected, keyword, all_posts=posts):
+    for post, field_score, body_score in rank(selected, keyword, all_posts=posts,
+                                              weighted=weight_metadata):
         d = _post_to_dict(post)
         d["score"] = {"field": field_score, "body": body_score}
         out.append(d)

@@ -33,6 +33,42 @@ _FIELDS = (
     ("summary", 6, 1),
 )
 
+# OPT-IN only (`--weight-metadata`), never the default. These are omx's
+# `_CONFIDENCE_WEIGHT`/`_STATUS_WEIGHT`, carried over verbatim from
+# `wiki/query.py` when omx's reader moved onto this ranker (PLAN B4).
+#
+# The default stays off for the reason B2 gave for not porting them at all:
+# measured on this store, `confidence` is absent on 77 of 122 posts and
+# `status` on 113, and `verified:` marks the same 45 posts as `confidence`, so
+# the fields record the post-schema generation rather than the evidence behind
+# a post. Weighting them by default would rank by when a post was written while
+# claiming to rank by how well it is backed. A caller whose store *does* fill
+# those fields -- which is what omx's experiment trees were built to do -- can
+# ask for them; nobody gets them by accident.
+#
+# Absent (None) is neutral in both maps, never a penalty: a hand-written post
+# that never set the field must not sink below one that set it to "low".
+_CONFIDENCE_WEIGHT = {"high": 1.0, "medium": 0.92, "low": 0.80, "none": 0.90, None: 0.90}
+_STATUS_WEIGHT = {
+    "needs-experiment": 1.0,
+    "needs-apply-before-retrain": 1.0,
+    "resolved": 0.70,
+    "none": 1.0,
+    None: 1.0,
+}
+
+
+def metadata_weight(post) -> float:
+    """confidence x status multiplier for one post; 1.0-neutral when absent.
+
+    An unknown value is neutral too -- the store's vocabulary is enforced by
+    `hq lint`, and a ranker is the wrong place to punish a post for failing it.
+    """
+    conf = post.fields.get("confidence")
+    stat = post.fields.get("status")
+    return (_CONFIDENCE_WEIGHT.get(conf, 0.90)
+            * _STATUS_WEIGHT.get(stat, 1.0))
+
 
 def tokenize(text: str) -> list:
     """Lowercased tokens: Latin/digit words, CJK singletons, and CJK bigrams.
@@ -102,7 +138,7 @@ def score_post(post, keyword: str) -> tuple:
     return field_score, body_score
 
 
-def rank(posts, keyword: str, *, all_posts=None) -> list:
+def rank(posts, keyword: str, *, all_posts=None, weighted: bool = False) -> list:
     """Posts ordered by relevance to `keyword`, most relevant first.
 
     Membership is not touched -- the caller's filter already decided that.
@@ -118,15 +154,42 @@ def rank(posts, keyword: str, *, all_posts=None) -> list:
     by the existence of its successor, not by that successor happening to match
     the same keyword. Reading only the filtered set made an outdated post rank
     as a head whenever its replacement used different words.
+
+    `weighted` scales the BODY tier by `metadata_weight` and then uses that same
+    weight as its own tier below it -- opt-in, off by default; see that function
+    for why it is opt-in and this paragraph for why it is placed here.
+
+    Not the field tier. omx's contract is that these weights "re-order NEAR-tied
+    scores while a clearly-stronger keyword match still wins", and omx could
+    honour it by blending everything into one number, where a 20x better body
+    beats a 0.56 discount. This key is tiered and sorted lexicographically, so a
+    discount on the FIRST tier is unrecoverable by the ones below it: applied
+    there, `status: resolved` alone dropped a post with twenty keyword matches
+    below one with a single mention. That is a veto, not a nudge.
+
+    And not the body tier alone, which was the first fix and was still wrong in
+    the other direction: `b * w` is 0 for every weight when b is 0, so two posts
+    matching only on their fields -- the common case for a short, well-tagged
+    store -- tied at zero and fell through to the accidental tiebreakers, with
+    `resolved` sometimes leading. The weight is therefore also its own tier, and
+    that tier is what decides when the body scores are equal.
+
+    The RETURNED scores are the weighted ones, not the raw match: a caller that
+    re-sorted by a raw score it was handed would get a different order than the
+    list it was handed, and this store has already paid four times over for two
+    readers of one number disagreeing about the rule.
     """
     superseded = {p.supersedes for p in (all_posts or posts) if p.supersedes}
     scored = []
     for p in posts:
         f, b = score_post(p, keyword)
-        scored.append((f, b, p.id not in superseded, p.fields.get("date", ""), p))
-    scored.sort(key=lambda t: (t[0], t[1], t[2], t[3], t[4].number), reverse=True)
-    ordered = [t[4] for t in scored]
-    score_of = {t[4].id: (t[0], t[1]) for t in scored}
+        w = metadata_weight(p) if weighted else 1.0
+        scored.append((f, b * w, w, p.id not in superseded,
+                       p.fields.get("date", ""), p))
+    scored.sort(key=lambda t: (t[0], t[1], t[2], t[3], t[4], t[5].number),
+                reverse=True)
+    ordered = [t[5] for t in scored]
+    score_of = {t[5].id: (t[0], t[1]) for t in scored}
 
     # Head preference is *within a chain*, which is the only place PLAN 2.3-2
     # asks for it. Neither extreme works: as the primary key it put unrelated

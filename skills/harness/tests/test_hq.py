@@ -970,6 +970,181 @@ class RankHeadPreferenceIsChainScopedTest(unittest.TestCase):
         self.assertEqual(ids[0], "decision/001")
 
 
+class QueryFilterAgreesWithRankerTest(unittest.TestCase):
+    """The filter and the ranker must be one rule, not two that agree by luck.
+
+    A whole-string substring filter drops a multi-word query whose terms live in
+    different fields: `--keyword "gpu memory"` returned nothing against a post
+    with `keywords: gpu, memory` and both words in its body, because no single
+    field contains that exact string. Found by a cross-model review.
+    """
+
+    def test_a_multi_word_keyword_finds_a_post_that_holds_every_term(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            verbs.post_new(root, category="finding", title="GPU usage", author="t",
+                           summary="Memory analysis", keywords=("gpu", "memory"),
+                           body="we analyzed gpu allocation and found memory leaks.",
+                           now="2026-08-27")
+            self.assertEqual(len(verbs.query(root, keyword="gpu memory")["posts"]), 1)
+
+    def test_membership_is_the_ranker_verdict_including_where_it_is_generous(self):
+        """One rule means one rule, not "the stricter of two".
+
+        `score_post` still gives a flat +3 when the raw query string appears
+        anywhere in the body, so "api" scores 3 against a body reading
+        "capitalization" and the post IS returned -- ranked last, on the body
+        tier, which is where a substring-only hit belongs. That is the ranker's
+        call to make; a filter overriding it would be the second rule again.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            verbs.post_new(root, category="finding", title="Capitalization rules",
+                           author="t", summary="none", body="capitalization only",
+                           now="2026-08-27")
+            posts = verbs.query(root, keyword="api")["posts"]
+            self.assertEqual([p["id"] for p in posts], ["finding/001"])
+            self.assertEqual(posts[0]["score"], {"field": 0, "body": 3})
+
+    def test_a_post_the_ranker_scores_zero_is_never_returned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            verbs.post_new(root, category="finding", title="Buoyancy", author="t",
+                           summary="none", body="nothing about the query here",
+                           now="2026-08-27")
+            self.assertEqual(verbs.query(root, keyword="graphify")["posts"], [])
+
+    def test_every_returned_post_has_a_nonzero_score(self):
+        """The invariant the delegation buys: nothing is returned that the
+        ranker scored zero, so the order can always be argued with."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            for n, (title, body) in enumerate(
+                    [("GPU usage", "gpu memory"), ("Unrelated", "nothing here")], 1):
+                verbs.post_new(root, category="finding", title=title, author="t",
+                               summary="none", body=body, now="2026-08-27")
+            posts = verbs.query(root, keyword="gpu")["posts"]
+            self.assertTrue(posts)
+            for post_d in posts:
+                self.assertGreater(post_d["score"]["field"] + post_d["score"]["body"], 0)
+
+
+# --- B4: opt-in metadata weighting ----------------------------------------
+
+class MetadataWeightOptInTest(unittest.TestCase):
+    """PLAN B4 / user decision (c): omx's confidence+status weights come back as
+    an OPT-IN flag, never the default. Every test here also has to fail when the
+    opt-in is removed -- a green suite that passes with the flag ignored would
+    be pinning nothing."""
+
+    def _p(self, n, **fields):
+        f = {"id": f"finding/{n:03d}", "date": "2026-08-27",
+             "keywords": "graphify", "supersedes": "none"}
+        f.update({k: v for k, v in fields.items() if k not in ("body", "title")})
+        return post.Post(path=None, title=fields.get("title", "t"), fields=f,
+                         body=fields.get("body", ""), comments=[])
+
+    def test_off_by_default(self):
+        """The default order must NOT see the metadata at all."""
+        resolved = self._p(1, status="resolved", body="graphify graphify")
+        open_lead = self._p(2, status="needs-experiment", body="graphify")
+        ids = [x.id for x, _f, _b in rank.rank([open_lead, resolved], "graphify")]
+        self.assertEqual(ids, ["finding/001", "finding/002"])
+
+    def test_the_flag_sinks_a_resolved_post_past_a_near_tie(self):
+        """0.70 x resolved is exactly the near-tie discount omx documented."""
+        resolved = self._p(1, status="resolved", body="graphify graphify")
+        open_lead = self._p(2, status="needs-experiment", body="graphify")
+        ids = [x.id for x, _f, _b in rank.rank([open_lead, resolved], "graphify",
+                                               weighted=True)]
+        self.assertEqual(ids, ["finding/002", "finding/001"])
+
+    def test_a_clearly_stronger_match_still_wins_when_weighted(self):
+        """The weights re-order NEAR ties; they are not a veto. omx's own bound:
+        worst case is 0.80 x 0.70 = 0.56, so a 2x better match survives."""
+        strong_resolved = self._p(1, status="resolved", confidence="low",
+                                  body="graphify " * 20)
+        weak_open = self._p(2, status="needs-experiment", confidence="high",
+                            body="graphify")
+        ids = [x.id for x, _f, _b in rank.rank([weak_open, strong_resolved],
+                                               "graphify", weighted=True)]
+        self.assertEqual(ids[0], "finding/001")
+
+    def test_absent_metadata_is_neutral_not_penalised(self):
+        """A post that never set confidence must not sink below one set to low.
+        omx's map made absence 0.90 and low 0.80 for exactly this."""
+        absent = self._p(1)
+        low = self._p(2, confidence="low")
+        self.assertGreater(rank.metadata_weight(absent), rank.metadata_weight(low))
+
+    def test_none_is_read_as_absence_not_as_an_unknown_value(self):
+        """`confidence: none` is this store's explicit-absence sentinel and 45
+        posts carry it. Reading it as an unknown string would still land on the
+        0.90 default -- so the test pins the sentinel to the SAME weight as a
+        missing field, which is the claim that actually matters."""
+        self.assertEqual(rank.metadata_weight(self._p(1, confidence="none")),
+                         rank.metadata_weight(self._p(2)))
+        self.assertEqual(rank.metadata_weight(self._p(3, status="none")),
+                         rank.metadata_weight(self._p(4)))
+
+    def test_returned_scores_are_the_weighted_ones(self):
+        """Order must stay monotonic in the score the caller is handed. Handing
+        back a raw score under a weighted order is the two-readers-of-one-number
+        defect this round has hit four times."""
+        resolved = self._p(1, status="resolved", body="graphify")
+        [(_p, _f, b)] = rank.rank([resolved], "graphify", weighted=True)
+        [(_p2, _f2, b_raw)] = rank.rank([resolved], "graphify")
+        self.assertLess(b, b_raw)
+
+    def test_the_weight_still_decides_when_the_body_tier_ties_at_zero(self):
+        """The near-tie case a short, well-tagged store actually produces.
+
+        Weighting only `body` looked right and was inert exactly where it was
+        needed: `b * w` is 0 for every weight when b is 0, so two posts matching
+        on their fields alone tied at zero and fell through to the accidental
+        tiebreakers, with `resolved` sometimes leading. Caught by a cross-model
+        review, reproduced before it was fixed.
+        """
+        resolved = self._p(2, status="resolved", title="optimizer config")
+        open_lead = self._p(1, status="needs-experiment", title="optimizer config")
+        ids = [x.id for x, _f, b in rank.rank([resolved, open_lead],
+                                              "optimizer config", weighted=True)]
+        assert rank.score_post(resolved, "optimizer config")[1] == 0   # the tie is real
+        self.assertEqual(ids, ["finding/001", "finding/002"])
+
+    def test_the_weight_tier_is_below_the_body_tier_not_above_it(self):
+        """It breaks ties; it does not overturn a better body match."""
+        resolved = self._p(2, status="resolved", body="graphify " * 20)
+        open_lead = self._p(1, status="needs-experiment", body="graphify")
+        ids = [x.id for x, _f, _b in rank.rank([open_lead, resolved], "graphify",
+                                               weighted=True)]
+        self.assertEqual(ids[0], "finding/002")
+
+    def test_cli_flag_reaches_the_ranker(self):
+        """End-to-end: the argparse flag, the verb kwarg, and the ranker are
+        three separate wires and any one of them can be the one that is missing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            _write_post(root, "finding", 1, title="resolved one",
+                        extra_bullets="- keywords: graphify\n- status: resolved\n",
+                        body="graphify graphify")
+            _write_post(root, "finding", 2, title="open one",
+                        extra_bullets="- keywords: graphify\n"
+                                      "- status: needs-experiment\n",
+                        body="graphify")
+            plain = [p["id"] for p in verbs.query(root, keyword="graphify")["posts"]]
+            weighted = [p["id"] for p in
+                        verbs.query(root, keyword="graphify",
+                                    weight_metadata=True)["posts"]]
+            self.assertEqual(plain, ["finding/001", "finding/002"])
+            self.assertEqual(weighted, ["finding/002", "finding/001"])
+
+
 # --- B3: grounded review comments -----------------------------------------
 
 class ParseReviewTest(unittest.TestCase):

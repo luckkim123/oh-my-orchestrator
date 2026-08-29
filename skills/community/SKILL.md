@@ -22,6 +22,7 @@ nothing on any store — do not write there.
 
 ```bash
 hq query --keyword servo            # by keyword
+hq query --keyword servo --weight-metadata   # ...and let confidence/status break ties
 hq query --subject thruster-gain    # the canonical post for a subject, and what it shadows
 hq query --topic decision           # by taxonomy
 hq query --status needs-experiment  # open leads
@@ -38,11 +39,18 @@ buried in a body, and only then does the body break ties by how often it says it
 post that something supersedes sinks below every chain head — it is still returned,
 because dropping it would answer a history question with silence, but it is not the
 answer. Each hit carries its own `score` (`field` and `body`) so the order can be
-argued with rather than trusted. What deliberately does *not* move rank: `confidence`
-(self-reported), `status` (absent on 113 of 122 posts), and `verified:` (present on
-exactly the posts that also carry `confidence`, so it marks a schema generation, not
-evidence). Ranking by any of them would sort by when a post was written while
-claiming to sort by how well it is backed.
+argued with rather than trusted. What deliberately does *not* move rank **by
+default**: `confidence` (self-reported), `status` (absent on 113 of 122 posts), and
+`verified:` (present on exactly the posts that also carry `confidence`, so it marks a
+schema generation, not evidence). Ranking by any of them would sort by when a post was
+written while claiming to sort by how well it is backed.
+
+`--weight-metadata` turns the first two on, and it exists for a store that actually
+fills them — omx's experiment trees set `status` on every open lead. It weighs the
+tie-breaking body tier only, so placement still decides and metadata only chooses among
+posts whose placement is equal; weighing the top tier turned a `resolved` flag into a
+veto that outranked twenty keyword matches. Absence stays neutral, never a penalty.
+Do not reach for it on a store like this one, where the fields are mostly empty.
 
 **A grounded contradiction sinks a post, and you should read that as the gate it is.**
 Before using a post as your answer, look at its `reviews` — `hq query` returns only the
