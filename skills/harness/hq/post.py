@@ -16,8 +16,11 @@ the §4 template pairs `harness:`+`to:` and `verified:`+`keywords:`
 separately — so template-based reconstruction cannot reproduce them
 byte-for-byte, which the mandatory round-trip test requires.
 `raw_prefix_lines` is None only for a freshly constructed Post (post_new),
-which always uses the §4 template; comment()/edit() never touch frontmatter,
-so a parsed post's raw_prefix_lines stays valid across those mutations.
+which always uses the §4 template. comment() never touches frontmatter, and
+edit() reaches it only through `set_field_in_raw` — a segment-level rewrite of
+one named field that leaves every other byte of the line alone, so a parsed
+post's raw_prefix_lines stays valid across both mutations. Assigning
+`post.fields[k] = v` without that call is silently discarded on serialize.
 """
 from __future__ import annotations
 
@@ -265,30 +268,64 @@ def _build_frontmatter_bullets(fields: dict) -> list:
     return out
 
 
-def set_summary_in_raw(post: Post, value: str) -> None:
-    """Rewrite `summary:` on a PARSED post, in `fields` and in the raw line.
+def set_field_in_raw(post: Post, key: str, value: str) -> None:
+    """Rewrite one frontmatter field on a PARSED post, in `fields` AND in the raw line.
 
     The module docstring's invariant is that only body/comments mutate after a
     parse, so `serialize_post` echoes `raw_prefix_lines` verbatim and assigning
-    `post.fields[...]` alone is silently discarded. `summary:` is the one field a
-    correction has to reach -- it is what INDEX.md and `hq query` show -- so it
-    gets this narrow exception. Only the summary segment of its own bullet is
-    replaced; every other line, and every other segment of that line, is left
-    byte-identical.
+    `post.fields[...]` alone is silently discarded. Fields an `edit` has to reach
+    get this narrow exception: `summary:` (what INDEX.md and `hq query` show) and
+    `status:` (what ranking and `omx queue-launch` read). Only the field's own
+    segment is replaced; every other line, and every other segment of that line,
+    is left byte-identical.
+
+    A REST_OF_LINE key owns its segment *and every segment after it* -- the
+    parser reads `- summary: A · B` as one value, so replacing only the first
+    segment left the old value's tail glued onto the new one. Measured
+    2026-08-29: 12 live posts carry a ' · ' inside `summary:`, and every one of
+    them would have been silently corrupted by an `hq edit --summary`.
     """
-    post.fields["summary"] = value
+    if "\n" in value or "\r" in value:
+        # A newline in the value ends the bullet and starts a new one, so the
+        # rest of it is parsed as frontmatter. `hq edit --summary $'safe\n-
+        # status: hacked'` wrote a `status:` that never passed the STATUSES
+        # gate -- validating one field is worthless if another can forge it.
+        raise HqError(f"{key}: value cannot contain a newline")
+    key = key.lower()
+    post.fields[key] = value
     if post.raw_prefix_lines is None:      # freshly built -- fields are the source
         return
+
+    # Find the occurrence `parse_bullet_line` would resolve to, not the first one
+    # that looks right. It differs in three ways, each of which produced a silent
+    # wrong write (measured 2026-08-29, all exit 0):
+    #   * keys are lowercased on parse, so `Status:` is the `status` field and a
+    #     case-sensitive scan reported the field absent instead;
+    #   * a repeated key resolves to the LAST one (dict assignment), so mutating
+    #     the first left the effective value untouched;
+    #   * a REST_OF_LINE key swallows the remainder of its bullet, so a
+    #     `- summary: A · status: none` line has no status field in it at all --
+    #     scanning past the summary rewrote prose and missed the real field.
+    target = None
     for i, line in enumerate(post.raw_prefix_lines):
         if not line.startswith("- "):
             continue
-        segs = _split_paren_aware(line[2:], " · ")
-        for j, seg in enumerate(segs):
-            if seg.split(":", 1)[0].strip() == "summary":
-                segs[j] = f"summary: {value}"
-                post.raw_prefix_lines[i] = "- " + " · ".join(segs)
-                return
-    raise HqError(f"{post.fields.get('id', '?')} has no summary: line to replace")
+        for j, seg in enumerate(_split_paren_aware(line[2:], " · ")):
+            k = seg.split(":", 1)[0].strip().lower()
+            if k == key:
+                target = (i, j)
+            if k in REST_OF_LINE_KEYS:
+                break                      # the parser stops here; so do we
+    if target is None:
+        raise HqError(f"{post.fields.get('id', '?')} has no {key}: line to replace")
+
+    i, j = target
+    segs = _split_paren_aware(post.raw_prefix_lines[i][2:], " · ")
+    if key in REST_OF_LINE_KEYS:
+        segs[j:] = [f"{key}: {value}"]
+    else:
+        segs[j] = f"{key}: {value}"
+    post.raw_prefix_lines[i] = "- " + " · ".join(segs)
 
 
 def serialize_post(post: Post) -> str:

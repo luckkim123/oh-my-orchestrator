@@ -2,6 +2,103 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.0] - 2026-08-29 — a status nobody could move is not a status
+
+### Added
+- **`hq edit --status <value>`** (`skills/harness/hq/`). Until now a post's
+  `status:` was whatever `hq post` stamped at birth and **no verb could move it** —
+  `hq query --status needs-experiment` existed on the read side with nothing on the
+  write side, so a lead that closed stayed open on the board forever. Measured on the
+  live store: 121 posts, **113 at `status: none`**, 4 `needs-experiment`, 3 `resolved`,
+  2 `needs-apply-before-retrain`. That skew is not what the world looks like; it is what
+  a field that cannot be updated looks like. This is B1 of the hq-engine-consolidation
+  plan and the prerequisite for B2 ranking, which cannot weight a field nobody maintains.
+
+  Adopted as a flag on `edit` rather than a new `hq status` verb or a forced supersede:
+  `--summary` already sits in that position, forcing supersede would mint a new post per
+  status change, and a new verb grows the surface for nothing.
+
+- **`--body-file` is now optional on `hq edit`.** A field-only edit had no way to supply
+  it: `hq query --post-id` returns fields and **never the body**, so requiring it would
+  have forced the caller to hand-extract markdown — precisely the raw-file editing these
+  verbs exist to replace. An edit passing none of `--body-file`/`--summary`/`--status` is
+  refused rather than appending a comment and changing nothing.
+
+### Fixed
+- **`hq edit --summary` silently truncated any summary containing ` · `.**
+  `set_summary_in_raw` split the bullet on ` · ` and replaced only the matching
+  *segment*, but `summary:` is a `REST_OF_LINE_KEYS` field — the parser reads
+  `- summary: A · B` as one value. Replacing segment 0 left `- summary: <new> · B`, and
+  the reparse read the old tail glued onto the new summary. Exit 0, lint clean, no
+  warning anywhere. **12 of 121 live posts carry a ` · ` inside `summary:`** and every
+  one of them was exposed.
+
+  The fix is in the generalized `set_field_in_raw(post, key, value)` that `--status`
+  needed anyway: a REST_OF_LINE key now takes its own segment **and every segment after
+  it** (`segs[j:] = [...]`), a normal key still takes only its own — which is what
+  `status:` requires, since it shares a bullet with `confidence:`. One mutator, both
+  callers, the bug fixed where all callers route through.
+
+- **The raw-line mutator resolved a different occurrence than the parser does** — four
+  ways, each writing wrong bytes at **exit 0**. Found by handing the first version of
+  this diff to codex with "attack it, do not write a patch"; six judgments went in, it
+  rejected five, and four were real. The author could not see them.
+
+  1. **A `REST_OF_LINE` value hides a later key.** `parse_bullet_line` stops at
+     `summary:` — `- summary: A · status: none` contains *no* status field. The mutator
+     scanned past it, rewrote the prose (`A · status: resolved`) and left the real
+     `status:` on the next line untouched, reporting `{"edited": true}`.
+  2. **A repeated key resolves to the last one** (dict assignment), and the mutator took
+     the first, so the effective value never moved.
+  3. **Keys are lowercased on parse**, so `Status:` *is* the status field; the
+     case-sensitive scan called it absent and refused a legitimate edit.
+  4. **A newline in a value forges a frontmatter bullet.**
+     `hq edit --summary $'safe\n- status: hacked'` wrote `status: hacked` straight past
+     the `STATUSES` gate — validating one field is worthless while another can forge it.
+     Values containing a newline are now refused.
+
+  The scan now walks every bullet, keeps the **last** case-insensitive match, and breaks
+  at a `REST_OF_LINE` key exactly where the parser does.
+
+- **`post.py`'s module docstring claimed `edit()` never touches frontmatter.** It has
+  been false since `--summary` landed and would have been false again for `--status`.
+  A stale invariant in the file that documents the invariant is worse than none.
+
+### Verification
+- `python3 -m unittest tests.test_hq tests.test_hooks tests.test_paths_lint` — **162/162**.
+  Twelve new. Seven for the verb: status round-trips *through the file* (re-parsed from disk, not from the
+  in-memory Post — a fixture that inspects only the object is green while the file never
+  changed), the `confidence:` line-mate survives, the body survives a status-only edit,
+  an unknown status is refused, an edit that changes nothing is refused, a no-git anchor
+  still redirects to supersede, and a summary with separators is replaced whole.
+- **End-to-end against a copy of the live vault store** (121 real posts), via `bin/hq`:
+  `hq --json edit finding/121 --status resolved` → the raw line moved
+  `- confidence: high · status: none` → `· status: resolved`, `hq query --post-id`
+  reparsed `resolved`, `confidence` and the 183-char summary intact, `hq lint` clean, and
+  `diff` against the original showed **exactly two changed lines** — the status value and
+  the audit comment. On `finding/109` (a real post with ` · ` in its summary) an
+  `--summary` edit now replaces the value whole instead of gluing on the old tail, and
+  `--summary $'x\n- status: hacked'` exits **1** where it previously exited 0 having
+  written `status: hacked`.
+
+### Notes
+- **`--status` does not open a write path on a no-git anchor.** `edit` still refuses
+  there and redirects to supersede — without git there is no copy of the old body. B2's
+  ranking design must not assume otherwise.
+- A `--status`-only edit does **not** reindex: `INDEX.md` renders id, subject, title and
+  summary, and no status. `--summary` still does.
+- **A legacy post with no `status:` line cannot be repaired through this verb** — it
+  refuses loudly rather than inserting one. Measured: 0 such posts across all four
+  anchors on this machine, and `hq lint` already reports one as pre-schema. Loud is the
+  point; the silent version of this was defect 1 above.
+- Three weaknesses the same attack surfaced that **predate this diff and are not fixed
+  here**, recorded so the next round does not rediscover them: `_is_git_anchor` accepts
+  an empty or malformed `.git/` (`git rev-parse` exits 128 and the gate still opens);
+  `lint`'s index-drift check compares id sets, not rendered summaries; and the parser
+  drops non-bullet text between `## Comments` and the first `- ` entry, which a
+  field-only edit would then persist. The last is not reachable on either live store —
+  the mandatory round-trip tests over the real vault and claudebase posts both pass.
+
 ## [0.12.0] - 2026-08-29 — the vendor lane could not change vendors, and nobody could see it
 
 ### Fixed

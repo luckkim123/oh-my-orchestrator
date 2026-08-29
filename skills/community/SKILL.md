@@ -44,7 +44,7 @@ before concluding, and say "not found by X" rather than "does not exist."
 |:---|:---|:---|
 | record something settled | `hq post` | one post, one claim, conclusion in `--summary` |
 | add to or dispute an existing record | `hq comment` | append-only; never rewrites a line |
-| fix a record that is wrong | `hq edit` | **git-tracked anchors only** — records who and why, and git holds the old body. Pass `--summary` too when the correction changes what the post claims |
+| fix a record that is wrong, or move its status | `hq edit` | **git-tracked anchors only** — records who and why, and git holds the old body. Pass `--summary` too when the correction changes what the post claims, `--status` when the lead opened or closed |
 | find out what is known | `hq query` | see above |
 
 ```bash
@@ -57,6 +57,7 @@ EOF
 
 hq comment finding/042 --author reviewer --text "재현 안 됨 — 같은 커밋에서 통과"
 hq edit    finding/042 --author session  --reason "measured the opposite" --body-file fix.md
+hq edit    finding/042 --author session  --reason "probe ran, lead closed" --status resolved
 ```
 
 Global flags (`--anchor`, `--json`, `--version`) come **before** the verb. `--body-file -`
@@ -69,9 +70,23 @@ schema: `hq lint` reads a post missing either as pre-schema and warns. (`--verif
 defaults to `none` since 0.10.0 — before that, omitting it produced the same warning on
 a post the supported writer had just created.)
 
+`--body-file` is optional. A `--status`- or `--summary`-only edit leaves the body
+byte-identical, which is the only way a field-only correction can work: `hq query`
+returns fields and never the body, so requiring `--body-file` would force the caller to
+hand-extract markdown — the raw-file editing these verbs exist to replace. An edit that
+passes none of the three is refused rather than writing a comment and nothing else.
+
+`--status` is the write side of `hq query --status`. Until 0.13.0 a post's status was
+whatever `hq post` stamped at birth and no verb could move it, so a lead that closed
+stayed open on the board forever and `status:` was too stale to rank on. Move it when
+the world moves: `needs-experiment` → `resolved` when the probe ran,
+`needs-apply-before-retrain` → `resolved` when the fix landed. The `--reason` is
+required and lands in the comments, so the board keeps *why* it moved.
+
 On a **no-git anchor** `hq edit` refuses outright and tells you to supersede instead —
 without git there is no copy of the old body, so an edit would destroy the record. That
-is a property of the anchor, not of the post.
+is a property of the anchor, not of the post. **`--status` does not open a door there** —
+on a no-git anchor a status change is still a supersede.
 
 ## Which category
 

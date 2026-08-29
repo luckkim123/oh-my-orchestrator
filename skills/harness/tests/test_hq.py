@@ -498,6 +498,26 @@ class EditSummaryTest(unittest.TestCase):
             self.assertNotIn("10 open leads", idx)
             self.assertEqual(verbs.lint(root)["errors"], [])
 
+    def test_a_summary_with_separators_is_replaced_whole(self):
+        """A REST_OF_LINE field owns every segment after its own.
+
+        Measured 2026-08-29: 12 live posts carry ' · ' inside `summary:`, and
+        the segment-only replacement left the old value's tail glued onto the
+        new one -- `hq edit --summary` silently corrupted them, exit 0.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._git_anchor(root)
+            verbs.post_new(root, category="finding", title="T", author="t",
+                           summary="A 는 X · B 는 Y · C 는 Z", body="b",
+                           subject="s", topic="debugging", now="2026-08-29")
+            verbs.edit(root, "finding/001", new_body="corrected",
+                       reason="miscounted", author="t", now="2026-08-29",
+                       new_summary="고침")
+            path = root / ".hq/community/posts/finding/001-t.md"
+            reparsed = post.parse_post(path, path.read_text("utf-8"))
+            self.assertEqual(reparsed.fields["summary"], "고침")
+
     def test_summary_is_optional(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -509,6 +529,145 @@ class EditSummaryTest(unittest.TestCase):
                        reason="body only", author="t", now="2026-08-29")
             written = (root / ".hq/community/posts/finding/001-t.md").read_text("utf-8")
             self.assertIn("summary: kept", written)
+
+
+class RawFieldMutatorTest(unittest.TestCase):
+    """`set_field_in_raw` must resolve the SAME occurrence `parse_bullet_line`
+    does. All five cases below were reproduced writing the wrong bytes at exit 0
+    on 2026-08-29, and four came from a cross-model attack on the first version
+    of this mutator -- the author could not see them.
+    """
+
+    def _round_trip(self, raw, key, value):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "001-x.md"
+            path.write_text(raw, encoding="utf-8")
+            parsed = post.parse_post(path, raw)
+            post.set_field_in_raw(parsed, key, value)
+            return post.parse_post(path, post.serialize_post(parsed))
+
+    def test_a_rest_of_line_value_hides_a_later_key_from_the_mutator_too(self):
+        # `- summary: A · status: none` has NO status field in it -- summary
+        # swallows the rest of the bullet. Scanning past it rewrote the prose
+        # and left the real status untouched.
+        raw = ("# T\n- id: finding/001\n"
+               "- summary: A · status: none\n"
+               "- confidence: high · status: needs-experiment\n\nb\n")
+        out = self._round_trip(raw, "status", "resolved")
+        self.assertEqual(out.fields["status"], "resolved")
+        self.assertEqual(out.fields["summary"], "A · status: none")
+
+    def test_a_repeated_key_resolves_to_the_last_one(self):
+        raw = ("# T\n- id: finding/001\n- status: none\n"
+               "- status: needs-experiment\n\nb\n")
+        self.assertEqual(
+            self._round_trip(raw, "status", "resolved").fields["status"], "resolved")
+
+    def test_a_capitalised_key_is_found(self):
+        # parse_bullet_line lowercases keys, so `Status:` IS the status field;
+        # a case-sensitive scan called it absent and refused a legitimate edit.
+        raw = "# T\n- id: finding/001\n- Status: none\n\nb\n"
+        self.assertEqual(
+            self._round_trip(raw, "status", "resolved").fields["status"], "resolved")
+
+    def test_a_newline_in_a_value_is_refused(self):
+        # It would end the bullet and start another, forging a frontmatter
+        # field that never passed its own gate: `--summary $'safe\n- status:
+        # hacked'` wrote status: hacked past STATUSES.
+        raw = ("# T\n- id: finding/001\n- confidence: high · status: none\n"
+               "- summary: safe\n\nb\n")
+        with self.assertRaises(HqError):
+            self._round_trip(raw, "summary", "safe\n- status: hacked")
+
+    def test_an_absent_field_refuses_loudly(self):
+        # A legacy post with no `status:` line cannot be repaired through this
+        # verb. That is a boundary, not a silent no-op -- `hq lint` reports such
+        # a post as pre-schema and the fix is a supersede.
+        raw = "# T\n- id: finding/001\n- confidence: high\n\nb\n"
+        with self.assertRaises(HqError):
+            self._round_trip(raw, "status", "resolved")
+
+
+class EditStatusTest(unittest.TestCase):
+    """`hq edit --status` -- B1 of the hq-engine-consolidation plan.
+
+    Acceptance (PLAN section 7): the value reaches the FILE, verified by
+    re-parsing from disk. `post.fields[...] = v` alone is discarded by
+    `serialize_post`, so a fixture that only inspects the in-memory Post is
+    green while the file never changed.
+    """
+
+    def _git_anchor(self, root):
+        _write_anchor(root, "one-repo")
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+
+    def _seed(self, root, **kw):
+        verbs.post_new(root, category="finding", title="T", author="t",
+                       summary="s", body="b", subject="sub", topic="debugging",
+                       now="2026-08-29", **kw)
+        return root / ".hq/community/posts/finding/001-t.md"
+
+    def test_status_round_trips_through_the_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._git_anchor(root)
+            path = self._seed(root, status="needs-experiment")
+            verbs.edit(root, "finding/001", reason="probe ran", author="t",
+                       now="2026-08-29", new_status="resolved")
+            reparsed = post.parse_post(path, path.read_text("utf-8"))
+            self.assertEqual(reparsed.fields["status"], "resolved")
+            self.assertEqual(verbs.lint(root)["errors"], [])
+
+    def test_status_change_leaves_its_line_mate_intact(self):
+        # `status:` shares a bullet with `confidence:` -- a rest-of-line
+        # replacement here would swallow nothing, but a wrong split would.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._git_anchor(root)
+            path = self._seed(root, confidence="high", status="none")
+            verbs.edit(root, "finding/001", reason="r", author="t",
+                       now="2026-08-29", new_status="needs-experiment")
+            written = path.read_text("utf-8")
+            self.assertIn("- confidence: high · status: needs-experiment", written)
+
+    def test_body_survives_a_status_only_edit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._git_anchor(root)
+            path = self._seed(root)
+            verbs.edit(root, "finding/001", reason="r", author="t",
+                       now="2026-08-29", new_status="resolved")
+            self.assertIn("\nb\n", path.read_text("utf-8"))
+
+    def test_unknown_status_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._git_anchor(root)
+            self._seed(root)
+            with self.assertRaises(HqError):
+                verbs.edit(root, "finding/001", reason="r", author="t",
+                           now="2026-08-29", new_status="done")
+
+    def test_an_edit_that_changes_nothing_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._git_anchor(root)
+            self._seed(root)
+            with self.assertRaises(HqError):
+                verbs.edit(root, "finding/001", reason="r", author="t",
+                           now="2026-08-29")
+
+    def test_no_git_anchor_still_redirects_to_supersede(self):
+        # PLAN section 2.4: `--status` does NOT open a write path on a no-git
+        # anchor. Ranking must not assume it did.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "one-repo")
+            self._seed(root)
+            with self.assertRaises(HqError) as cm:
+                verbs.edit(root, "finding/001", reason="r", author="t",
+                           now="2026-08-29", new_status="resolved")
+            self.assertIn("supersede", str(cm.exception))
 
 
 class VerifiedDefaultTest(unittest.TestCase):

@@ -88,9 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     edit_p.add_argument("post_id")
     edit_p.add_argument("--author", required=True)
     edit_p.add_argument("--reason", required=True)
-    edit_p.add_argument("--body-file", required=True, help="path, or '-' for stdin")
+    edit_p.add_argument("--body-file", default=None,
+                        help="path, or '-' for stdin; omit to leave the body alone")
     edit_p.add_argument("--summary", default=None,
                         help="replace summary: too — the field INDEX.md and query show")
+    edit_p.add_argument("--status", default=None,
+                        help=f"replace status: too — one of {verbs.STATUSES}")
 
     query_p = sub.add_parser("query")
     query_p.add_argument("--subject", default=None)
@@ -151,10 +154,11 @@ def main(argv=None) -> int:
 
         if args.verb == "edit":
             root = _resolve_anchor(args)
-            new_body = _read_body(args.body_file)
+            new_body = _read_body(args.body_file) if args.body_file else None
             result = verbs.edit(
                 root, args.post_id, new_body=new_body, reason=args.reason,
                 author=args.author, now=_now_date(), new_summary=args.summary,
+                new_status=args.status,
             )
             _print(result, args.json)
             return 0
