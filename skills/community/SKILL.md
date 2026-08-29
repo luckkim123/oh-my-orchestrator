@@ -12,8 +12,11 @@ it looks before deciding something that may already be settled.
 **This replaces the wiki.** A wiki page was a state ("this is true now"); a post is an
 event ("this is what was judged, then"). The merge kept both: the taxonomy a wiki page
 carried is now the `topic:` field, its staleness banner is the `verified:` field, and
-its "what is true now" is the head of a `subject:` chain. `.hq/community/wiki/` holds
-nothing on any store — do not write there.
+its "what is true now" is the head of a `subject:` chain. **The wiki form was retired
+outright on 2026-08-30** (r7) — oms, omd and omp dropped their readers with it, and
+nothing in this family creates a `community/wiki/` directory any more. A store that
+still holds pages converts once with `skills/harness/convert-wiki-form.py`; until it
+does, that directory is a staging path and never an answer.
 
 `hq` is the only supported writer. A hand-written post drifts from the schema, and
 `hq lint` is the only thing that catches the drift before it reaches another machine.
