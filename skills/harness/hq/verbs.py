@@ -14,6 +14,7 @@ from .anchor import (
 )
 from .post import (CONFIDENCES, STATUSES, TOPICS, Post, parse_bullet_line,
                    set_field_in_raw)
+from .rank import field_text, rank
 from .store import (
     INDEX_NAME, community_dir, list_posts, list_posts_with_errors, next_number,
     read_post, update_index, with_store_lock, write_post,
@@ -198,6 +199,11 @@ def edit(anchor_root, post_id, *, new_body=None, reason, author, now,
 
 def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
           topic=None, status=None, project=None):
+    # An empty keyword is not "match everything" — `"" in hay` is always true
+    # and `body.count("")` returns len(body)+1, so the query would come back
+    # with every post ordered longest-first while looking like a search.
+    if keyword is not None and not keyword.strip():
+        raise HqError("query --keyword requires a non-empty value")
     roots = _resolve_anchor_roots_for_query(start)
 
     if post_id is not None:
@@ -240,10 +246,20 @@ def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
 
     def matches(p):
         if keyword is not None:
-            hay = " ".join(
-                [p.title, p.body, p.fields.get("keywords", ""), p.fields.get("summary", "")]
-            ).lower()
-            if keyword.lower() not in hay:
+            # Per field, never a joined string. Joining invents phrases that
+            # exist in no field: with `keywords: contention` and
+            # `summary: measured`, the join reads "contention measured" and the
+            # post matched a phrase it does not contain — then outranked one
+            # that does, because the ranker reads the fields separately.
+            # These are exactly the fields rank.py weighs, read through the
+            # same function it reads them with. They diverged twice more while
+            # this was written: `subject` carried a weight no query could reach
+            # because it was missing here, and `keywords: none` matched here
+            # while scoring zero there. A field counts for both or for neither.
+            needle = keyword.lower()
+            fields = [p.title, p.body] + [field_text(p, k)
+                                          for k in ("keywords", "summary", "subject")]
+            if not any(needle in f.lower() for f in fields):
                 return False
         if harness is not None and p.fields.get("harness") != harness:
             return False
@@ -255,7 +271,19 @@ def query(start, *, subject=None, post_id=None, keyword=None, harness=None,
             return False
         return True
 
-    return {"posts": [_post_to_dict(p) for p in posts if matches(p)]}
+    selected = [p for p in posts if matches(p)]
+    if keyword is None:
+        return {"posts": [_post_to_dict(p) for p in selected]}
+
+    # Filtering is not ordering. Before this the result came back in post-number
+    # order, so `--keyword graphify` led with a post that mentions graphify once
+    # in passing while the post *about* graphify sat tenth.
+    out = []
+    for post, field_score, body_score in rank(selected, keyword, all_posts=posts):
+        d = _post_to_dict(post)
+        d["score"] = {"field": field_score, "body": body_score}
+        out.append(d)
+    return {"posts": out}
 
 
 def index(anchor_root, now):

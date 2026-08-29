@@ -2,6 +2,130 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.0] - 2026-08-29 — filtering is not ordering
+
+### Added
+- **`hq query --keyword` now ranks its results** (`skills/harness/hq/rank.py`, new).
+  Before this the verb had a filter and no order at all: `matches()` was a boolean
+  predicate and the survivors came back in post-number order. The pinned case, and now
+  a regression test — `--keyword graphify` led with `finding/088`, which mentions
+  graphify once in passing, while `finding/121`, the post *about* graphify, sat tenth.
+  This is B2 of the hq-engine-consolidation plan; B1 (`hq edit --status`, 0.13.0) was
+  its prerequisite.
+
+  Ported from omx `wiki/query.py`: CJK bigram tokenization, so a Korean query has an
+  ordering signal at all (Korean is not space-delimited inside a compound), and
+  field-tiered weights. **Not** ported: that ranker multiplies its score by
+  `confidence` and `status`, and this store does not support those weights. Measured
+  on the live store — `confidence` absent on 77 of 122 posts, `status` on 113, and
+  `verified:` present on **exactly the same 45 posts as `confidence`**, which makes it
+  a marker of the post-schema generation rather than of the evidence behind a post.
+  Weighting any of the three would order by when a post was written while claiming to
+  order by how well it is backed.
+
+  The key is two-level rather than blended — field placement first, body only to break
+  its ties — which is what PLAN §2.3-3 asks for. A superseded post sinks below every
+  chain head (§2.3-2) but is still returned; dropping it would answer a history
+  question with silence. Each hit carries its own `score` so the order can be argued
+  with, per §2.3's rejection of opaque scores.
+
+  **No ranking index was built,** though PLAN §2.3 provisions one in the `work/` layer.
+  A full scan with ranking measured 50–60 ms end to end across all four anchors
+  (122, 33, 17, 0 posts). An index at that size buys nothing and adds the staleness
+  failure mode the plan itself names as its risk. Revisit if a store gets large.
+
+### Fixed
+- **`--keyword ""` answered instead of refusing.** `"" in hay` is true for every post
+  and `str.count("")` returns `len(s) + 1`, so an empty keyword returned the whole
+  store ordered longest-body-first while looking like a search. Now refused, the way
+  `edit --summary ""` already is.
+- **`subject:` carried a ranking weight no query could reach.** The filter's haystack
+  (title, body, keywords, summary) and the ranker's weight table (keywords, title,
+  subject, summary) are two readers of one post, and they disagreed — `subject` could
+  only ever score when some *other* field had already matched. This is the third time
+  in this codebase that two readers of the same data under different rules produced a
+  silent wrong answer. `subject` is now in both.
+- **The `none` sentinel scored as content.** `keywords: none` means "no keywords" —
+  `p.supersedes` already reads it that way — but the ranker matched the literal string.
+  Both of the above are now read through one function, `rank.field_text`, so the filter
+  and the ranker cannot disagree about what a field says again.
+- **A post outranked its own replacement whenever the replacement used different
+  words.** The superseded set was built from the *filtered* slice, so a post counted as
+  a chain head unless its successor also matched the keyword — and a rewrite that
+  changes the vocabulary is exactly the case where it does not. It now reads the
+  unfiltered store: a post is superseded by the existence of its successor, not by that
+  successor's word choice.
+
+- **A backend override could still hand a role its own family's model**
+  (`codeagent-wrapper/internal/adapter/cli/parse.go`). 0.12.0 stopped the *accidental*
+  leak by clearing the model on a cross-vendor move; an explicit one still passed.
+  `--agent oracle --backend agy --model claude-opus-4-6-thinking` ran at **exit 0** and
+  returned a review written by the same family that wrote the code — agy serves Gemini,
+  Claude, and GPT-OSS from one CLI, so nothing rejected it. That defeats omo's
+  delegation ground 3, which exists precisely to get a judge that did not author the
+  work, and it defeats it silently.
+
+  Worse, the gesture that opens it is the *recommended* one: `vendor-ops.md` tells
+  callers to keep passing `--model` if their build predates the 0.12.0 fix.
+
+  Now refused, with the reason. The check needs no knowledge of the caller's own model:
+  the only reason to move `oracle` off claude is to get off claude, so a cross-vendor
+  override that lands back on the home family is decidably a mistake. Family matching is
+  by substring (`claude` / `gemini` / `gpt`·`codex`·`terra`) rather than a model list —
+  a list that must be updated per release is a guard that silently stops guarding — and
+  an unrecognised id passes, since this refuses a *known* self-review rather than
+  policing the namespace.
+
+  Measured 2026-08-29: `agy` with no `--model` resolves to Gemini 3.7 Flash, so the
+  default path was never affected.
+
+  ⚠️ **Go changes do not ship with the version bump.** `make build` and put the binary
+  on PATH, per machine.
+
+- **Five more, found by handing the diff to codex with "attack it, do not write a
+  patch".** Six judgments went in; it rejected five, and all five reproduced. Four of
+  them were one root cause — **substring matching where token matching was meant**:
+
+  | Query | What used to lead | Why |
+  |:---|:---|:---|
+  | `api` | a title reading "capitalization" | `"api" in "capitalization"` |
+  | `cat` | a body saying "concatenate" ten times | ten substring hits |
+  | `상태` | a post whose keywords are `상자, 태풍` | CJK singletons `상`, `태` scored |
+  | `contention measured` | a post holding neither phrase | the filter joined `keywords:` and `summary:` with a space and matched across the seam |
+
+  Fixed at the root: field and body matching is now over **tokens**, the phrase bonus
+  needs every term present as a token (not just the substring), CJK emits bigrams and
+  keeps singletons only for a one-character query, and the filter tests each field
+  separately instead of a joined string.
+
+- **Head preference was a global key, so unrelated posts outranked relevant ones.**
+  `is_head` meant "never superseded by anything", not "the head of *this* chain", so any
+  never-superseded singleton sorted above a superseded post squarely about the keyword.
+  Demoting it to a last tiebreaker then broke the other way — the live `decision/086`
+  led the very post that replaced it on a one-point difference. Head preference is now
+  **chain-scoped**, which is all PLAN §2.3-2 ever asked for: a superseded post takes its
+  own head's position and sits just below it, and keeps its own place when that head did
+  not match the query at all.
+
+### Verification
+- `python3 -m unittest tests.test_hq tests.test_hooks tests.test_paths_lint` — **185
+  pass** (23 new), exit code read directly, not through a pipe. Three tests that pinned
+  the pre-attack behaviour were rewritten, not deleted: the capability is corrected,
+  not gone.
+- Live store, through `bin/hq`, re-run after every fix above: `--keyword graphify`
+  leads with `finding/121` (field 22 / body 17) where `finding/088` used to;
+  `--keyword 라우팅` leads with `decision/103`; `--keyword 상태` leads with
+  `finding/111`; `--keyword om-store-layout` returns the chain head `decision/087`
+  first and the post it supersedes, `decision/086`, second — despite `086` scoring
+  one point higher.
+- `go test ./internal/adapter/cli/...` passes, and the same-family guard was checked by
+  **mutation**: disabling it (`if false && …`) makes exactly
+  `claude_role_to_agy_on_a_claude_model` fail. A green test is not evidence a guard
+  fires. Live: the refused command exits 1 with its reason.
+- Output shape for non-keyword queries is unchanged — no `score` key — so omx
+  `wiki/query.py`, which shells out to `hq --json query [--status X]`, is unaffected.
+  Grepped: no programmatic `--keyword` caller exists outside this repo.
+
 ## [0.13.0] - 2026-08-29 — a status nobody could move is not a status
 
 ### Added

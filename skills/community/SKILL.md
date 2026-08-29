@@ -32,6 +32,18 @@ hq query                            # everything — no filter means no filter
 `--subject` is the one that answers "what is true now": it returns that subject's head
 post and names the ones it supersedes. Everything else returns matches, not verdicts.
 
+**`--keyword` results are ordered, so read from the top.** Placement decides rank: a
+term in `keywords:`, the title, `subject:`, or `summary:` outranks the same term
+buried in a body, and only then does the body break ties by how often it says it. A
+post that something supersedes sinks below every chain head — it is still returned,
+because dropping it would answer a history question with silence, but it is not the
+answer. Each hit carries its own `score` (`field` and `body`) so the order can be
+argued with rather than trusted. What deliberately does *not* move rank: `confidence`
+(self-reported), `status` (absent on 113 of 122 posts), and `verified:` (present on
+exactly the posts that also carry `confidence`, so it marks a schema generation, not
+evidence). Ranking by any of them would sort by when a post was written while
+claiming to sort by how well it is backed.
+
 **An empty result is not an answer.** This repo has killed two tools by reading zero as
 absence — `tokensave` (6 calls against 10,813) and graphify's MCP server (0 in 30 days),
 both because nothing routed to them, not because nobody needed them. Same discipline

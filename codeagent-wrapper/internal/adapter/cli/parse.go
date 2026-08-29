@@ -150,6 +150,26 @@ func BuildSingleConfig(cmd *cobra.Command, args []string, rawArgv []string, opts
 		model = strings.TrimSpace(v.GetString("model"))
 	}
 
+	// A backend override that lands back on the home vendor's own model is not
+	// a second opinion. The one reason to move a role off its vendor is to get
+	// a model from a different family -- that is what omo's delegation ground 3
+	// (adversarial verification) requires, and the role table binds `oracle` to
+	// claude-opus-5, which is the model most sessions here are already running.
+	// Nothing caught this: `--agent oracle --backend agy --model claude-opus-4-6-thinking`
+	// is accepted by agy (it serves Gemini, Claude, and GPT-OSS from one CLI),
+	// runs at exit 0, and returns a confident review written by the same family
+	// that wrote the code. Measured 2026-08-29: agy with no `--model` resolves
+	// to Gemini 3.7 Flash, so only an explicit same-family model reaches here.
+	if agentFlagChanged && backendFlagChanged && backendName != resolvedBackend &&
+		model != "" && modelFamily(model) != "" &&
+		modelFamily(model) == modelFamily(resolvedModel) {
+		return nil, fmt.Errorf(
+			"--agent %s --backend %s --model %s: the override moves the role off %s "+
+				"but %s is still a %s model, so this is the caller's own family "+
+				"reviewing itself; pick a model from another family or drop --model",
+			agentName, backendName, model, resolvedBackend, model, modelFamily(model))
+	}
+
 	if cmd.Flags().Changed("reasoning-effort") {
 		reasoningEffort = strings.TrimSpace(opts.ReasoningEffort)
 		if reasoningEffort == "" {
@@ -252,4 +272,23 @@ func LastFlagIndex(argv []string, name string) int {
 		}
 	}
 	return last
+}
+
+// modelFamily names the vendor family a model id belongs to, or "" when the id
+// is not recognised. Substring matching rather than a fixed list: a family adds
+// model names continuously (claude-opus-5, claude-sonnet-4-6,
+// claude-opus-4-6-thinking) and a list that has to be updated per release is a
+// guard that silently stops guarding. Unknown ids return "" and are allowed --
+// this refuses a *known* self-review, it does not police the model namespace.
+func modelFamily(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.Contains(m, "claude"):
+		return "claude"
+	case strings.Contains(m, "gemini"):
+		return "gemini"
+	case strings.Contains(m, "gpt") || strings.Contains(m, "codex") || strings.Contains(m, "terra"):
+		return "gpt"
+	}
+	return ""
 }

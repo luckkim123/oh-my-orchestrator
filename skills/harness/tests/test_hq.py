@@ -18,7 +18,7 @@ HARNESS_DIR = Path(__file__).resolve().parent.parent  # skills/harness
 BIN_HQ = HARNESS_DIR.parent.parent / "bin" / "hq"      # repo root/bin/hq
 
 sys.path.insert(0, str(HARNESS_DIR))
-from hq import anchor, post, store, verbs  # noqa: E402
+from hq import anchor, post, rank, store, verbs  # noqa: E402
 from hq.anchor import (  # noqa: E402
     GATE_CORRUPT, GATE_LEGACY, GATE_NORMAL, GATE_OFF, HqError,
 )
@@ -729,3 +729,242 @@ class IndexDriftTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TokenizeTest(unittest.TestCase):
+    """B2: the CJK half of the port. Korean is not space-delimited inside a
+    compound, so without bigrams a Korean query has no ordering signal."""
+
+    def test_latin_words_and_digits(self):
+        self.assertEqual(rank.tokenize("Graphify v2"), ["graphify", "v2"])
+
+    def test_korean_yields_bigrams_not_singletons(self):
+        # Singletons were in the first cut, ported from omx. A lone Hangul
+        # syllable carries no meaning, so they only handed unrelated posts
+        # credit: querying 상태 scored a post whose keywords are 상자, 태풍.
+        self.assertEqual(rank.tokenize("라우팅"), ["라우", "우팅"])
+
+    def test_a_one_character_query_still_has_a_token(self):
+        self.assertEqual(rank.tokenize("팀"), ["팀"])
+
+    def test_matching_is_by_token_not_substring(self):
+        # `--keyword api` used to take a title reading "capitalization" first.
+        self.assertNotIn("api", set(rank.tokenize("capitalization")))
+
+    def test_mixed_script_keeps_both(self):
+        t = rank.tokenize("hq 상태")
+        self.assertIn("hq", t)
+        self.assertIn("상태", t)
+
+
+class RankFieldTiersTest(unittest.TestCase):
+    """B2 (PLAN §2.3-3): keyword/subject/summary placement outranks the body."""
+
+    def _post(self, **fields):
+        f = {"id": "finding/001", "date": "2026-08-27"}
+        f.update({k: v for k, v in fields.items() if k != "body" and k != "title"})
+        return post.Post(path=None, title=fields.get("title", "t"), fields=f,
+                         body=fields.get("body", ""), comments=[])
+
+    def test_keywords_field_outranks_body(self):
+        in_kw = self._post(keywords="graphify, index", body="unrelated")
+        in_body = self._post(body="graphify " * 50)
+        self.assertGreater(rank.score_post(in_kw, "graphify")[0],
+                           rank.score_post(in_body, "graphify")[0])
+
+    def test_body_only_scores_zero_on_the_field_tier(self):
+        p = self._post(body="graphify appears here")
+        self.assertEqual(rank.score_post(p, "graphify")[0], 0)
+
+    def test_body_tier_counts_occurrences_not_presence(self):
+        # Presence was the first cut: with a one-word query every matched post
+        # scored identically and the tie-breaking tier broke nothing.
+        once = self._post(body="graphify")
+        thrice = self._post(body="graphify graphify graphify")
+        self.assertGreater(rank.score_post(thrice, "graphify")[1],
+                           rank.score_post(once, "graphify")[1])
+
+    def test_a_word_that_merely_contains_the_query_does_not_outscore_it(self):
+        # `--keyword cat` ranked ten "concatenate"s above one "cat".
+        contains = self._post(body="concatenate " * 10)
+        is_it = self._post(body="cat")
+        self.assertGreater(rank.score_post(is_it, "cat")[1],
+                           rank.score_post(contains, "cat")[1])
+
+    def test_ordering_is_field_tier_first_then_body(self):
+        weak_field = self._post(summary="graphify")
+        strong_body = self._post(body="graphify " * 100)
+        ordered = rank.rank([strong_body, weak_field], "graphify")
+        self.assertIs(ordered[0][0], weak_field)
+
+
+class RankSupersededSinksTest(unittest.TestCase):
+    """B2 (PLAN §2.3-2): a chain head outranks what it supersedes, even on an
+    identical score — but the superseded post is still returned, because
+    dropping it would answer a history question with silence."""
+
+    def test_head_leads_and_superseded_is_kept(self):
+        common = dict(subject="s", keywords="graphify")
+        old = post.Post(path=None, title="old", comments=[], body="",
+                        fields={"id": "decision/001", "date": "2026-08-01",
+                                "supersedes": "none", **common})
+        new = post.Post(path=None, title="new", comments=[], body="",
+                        fields={"id": "decision/002", "date": "2026-08-02",
+                                "supersedes": "decision/001", **common})
+        ordered = [p.id for p, _f, _b in rank.rank([old, new], "graphify")]
+        self.assertEqual(ordered, ["decision/002", "decision/001"])
+
+
+class QueryKeywordRankingTest(unittest.TestCase):
+    """B2 acceptance (PLAN §7): the top hit for a word is a post about it."""
+
+    def test_the_post_about_the_word_leads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            _write_post(root, "finding", 1, title="Path lint recount",
+                        body="we ran graphify once to check.")
+            _write_post(root, "finding", 2, title="Vault prose is indexed",
+                        extra_bullets="- keywords: graphify, prose-index\n"
+                                      "- summary: graphify indexed 12,721 md nodes\n",
+                        body="graphify graphify")
+            ids = [p["id"] for p in verbs.query(root, keyword="graphify")["posts"]]
+            self.assertEqual(ids[0], "finding/002")
+
+    def test_subject_is_searchable_because_it_is_scored(self):
+        # The filter's haystack and the ranker's weight table are two readers
+        # of one post; when they disagreed, `subject:` carried a weight no
+        # query could ever reach.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            _write_post(root, "decision", 1, title="unrelated title",
+                        extra_bullets="- subject: om-store-layout\n",
+                        body="nothing else matches.")
+            ids = [p["id"] for p in verbs.query(root, keyword="om-store-layout")["posts"]]
+            self.assertEqual(ids, ["decision/001"])
+
+    def test_score_is_reported_so_the_order_can_be_audited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            _write_post(root, "finding", 1, title="x", body="graphify")
+            got = verbs.query(root, keyword="graphify")["posts"][0]
+            self.assertEqual(set(got["score"]), {"field", "body"})
+
+    def test_a_non_keyword_query_is_unranked_and_carries_no_score(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            _write_post(root, "finding", 1, title="x", extra_bullets="- topic: pattern\n")
+            got = verbs.query(root, topic="pattern")["posts"][0]
+            self.assertNotIn("score", got)
+
+
+class LiveStoreRankingRegressionTest(unittest.TestCase):
+    """The case PLAN §2.1 pinned as the proof that filtering is not ordering:
+    `--keyword graphify` used to lead with `finding/088`, which mentions
+    graphify in passing, while `finding/121` — the post about it — sat tenth."""
+
+    def test_graphify_leads_with_the_post_about_graphify(self):
+        if not VAULT_POSTS.exists():
+            self.skipTest("vault store not present on this machine")
+        posts = verbs.query(VAULT_POSTS.parents[2], keyword="graphify")["posts"]
+        self.assertTrue(posts, "expected the vault store to match 'graphify'")
+        self.assertEqual(posts[0]["id"], "finding/121")
+
+
+class QueryKeywordEdgeTest(unittest.TestCase):
+    """Two silent-nonsense inputs found while probing the ranker."""
+
+    def test_empty_keyword_is_refused_not_answered(self):
+        # `"" in hay` is always true and `body.count("")` returns len(body)+1,
+        # so an empty keyword came back as every post ordered longest-first.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            _write_post(root, "finding", 1, title="x")
+            with self.assertRaises(HqError):
+                verbs.query(root, keyword="   ")
+
+    def test_the_none_sentinel_is_absence_not_content(self):
+        p = post.Post(path=None, title="t", comments=[], body="",
+                      fields={"id": "finding/001", "keywords": "none"})
+        self.assertEqual(rank.score_post(p, "none"), (0, 0))
+
+
+class RankSupersededOutsideTheFilterTest(unittest.TestCase):
+    """A post is superseded by the existence of its successor, not by that
+    successor matching the same keyword. Reading the superseded set off the
+    filtered slice made an outdated post rank as a head whenever its
+    replacement was written with different words."""
+
+    def _p(self, num, **f):
+        base = {"id": f"finding/{num:03d}", "date": "2026-08-01", "subject": "s"}
+        base.update(f)
+        return post.Post(path=None, title=f.pop("title", "t"), comments=[],
+                         body=f.pop("body", ""), fields=base)
+
+    def test_the_successor_need_not_match_for_its_parent_to_sink(self):
+        # Two equally relevant posts; only one of them is superseded, and its
+        # successor is not in the filtered set. Head-ness breaks the tie only
+        # if the superseded set was read off the whole store.
+        outdated = self._p(1, keywords="servo", supersedes="none")
+        rival = self._p(3, subject="other", keywords="servo", supersedes="none")
+        successor = self._p(2, supersedes="finding/001", body="rewritten")
+        matched = [outdated, rival]
+        self.assertEqual(rank.score_post(outdated, "servo"),
+                         rank.score_post(rival, "servo"))   # the tie is real
+        ids = [p.id for p, _f, _b in
+               rank.rank(matched, "servo", all_posts=matched + [successor])]
+        self.assertEqual(ids, ["finding/003", "finding/001"])
+
+    def test_without_the_full_store_the_tie_breaks_the_other_way(self):
+        # The defect this pins, stated as the behaviour of the old call shape:
+        # `outdated` looks like a head because its successor did not match.
+        outdated = self._p(1, keywords="servo", supersedes="none")
+        rival = self._p(3, subject="other", keywords="servo", supersedes="none")
+        ids = [p.id for p, _f, _b in rank.rank([outdated, rival], "servo")]
+        self.assertEqual(ids[0], "finding/003")  # both look like heads; number wins
+
+    def test_relevance_outranks_head_ness(self):
+        # Head-ness as the PRIMARY key put any unrelated never-superseded post
+        # above a superseded post that was squarely about the keyword.
+        focused = self._p(1, keywords="graphify", supersedes="none")
+        successor = self._p(2, supersedes="finding/001", body="rewritten")
+        unrelated = self._p(3, subject="other", supersedes="none", body="graphify")
+        ids = [p.id for p, _f, _b in rank.rank([focused, unrelated], "graphify",
+                                               all_posts=[focused, successor, unrelated])]
+        self.assertEqual(ids[0], "finding/001")
+
+
+class RankHeadPreferenceIsChainScopedTest(unittest.TestCase):
+    """PLAN §2.3-2 asks for head preference *within a chain*. Both extremes
+    were tried and both were wrong: as the primary sort key it put unrelated
+    never-superseded posts above a superseded post squarely about the keyword;
+    as a last tiebreaker it let the live `decision/086` lead the very post that
+    replaced it, on a one-point scoring difference."""
+
+    def _p(self, num, **f):
+        base = {"id": f"decision/{num:03d}", "date": "2026-08-01", "subject": "s"}
+        base.update(f)
+        return post.Post(path=None, title=f.pop("title", "t"), comments=[],
+                         body=f.pop("body", ""), fields=base)
+
+    def test_the_head_leads_its_chain_even_when_it_scores_lower(self):
+        old = self._p(1, keywords="store layout", supersedes="none",
+                      summary="om-store-layout om-store-layout")
+        new = self._p(2, keywords="store layout", supersedes="decision/001")
+        self.assertGreater(rank.score_post(old, "store")[0],
+                           rank.score_post(new, "store")[0])   # the inversion is real
+        ids = [p.id for p, _f, _b in rank.rank([old, new], "store")]
+        self.assertEqual(ids, ["decision/002", "decision/001"])
+
+    def test_a_superseded_post_keeps_its_place_when_its_head_did_not_match(self):
+        # Nothing to shadow, so relevance decides and the outdated post leads.
+        focused = self._p(1, keywords="graphify", supersedes="none")
+        successor = self._p(2, supersedes="decision/001", body="rewritten")
+        unrelated = self._p(3, subject="other", supersedes="none", body="graphify")
+        ids = [p.id for p, _f, _b in rank.rank([focused, unrelated], "graphify",
+                                               all_posts=[focused, successor, unrelated])]
+        self.assertEqual(ids[0], "decision/001")
