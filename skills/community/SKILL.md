@@ -44,7 +44,7 @@ before concluding, and say "not found by X" rather than "does not exist."
 |:---|:---|:---|
 | record something settled | `hq post` | one post, one claim, conclusion in `--summary` |
 | add to or dispute an existing record | `hq comment` | append-only; never rewrites a line |
-| fix a record that is wrong | `hq edit` | **git-tracked anchors only** — records who and why, and git holds the old body |
+| fix a record that is wrong | `hq edit` | **git-tracked anchors only** — records who and why, and git holds the old body. Pass `--summary` too when the correction changes what the post claims |
 | find out what is known | `hq query` | see above |
 
 ```bash
@@ -97,8 +97,10 @@ That is what makes a post store usable as current knowledge rather than an archi
 A refuted record keeps its value — it is the evidence that the question was asked, and
 how it was answered wrongly. So:
 
-- Wrong body, git-tracked anchor → `hq edit` with a `--reason`, and a correction line in
-  the comments. The old text stays in git.
+- Wrong body, git-tracked anchor → `hq edit` with a `--reason`; it appends the correction
+  line to the comments for you and the old text stays in git. **If the correction changes
+  the claim, pass `--summary` in the same call.** `summary:` is what `INDEX.md` and
+  `hq query` show, so a fixed body under a stale summary is still advertising the error.
 - The answer has moved on → a new post with `--supersedes`. The old head stays reachable.
 - Not worth keeping → still keep it. `hq gc` only *reports* stale and superseded posts;
   it removes nothing, deliberately.

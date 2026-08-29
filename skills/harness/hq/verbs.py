@@ -12,7 +12,8 @@ from .anchor import (
     ANCHOR_REL, HqError, check_id_uniqueness, find_anchor_root, find_anchors,
     parse_anchor,
 )
-from .post import CONFIDENCES, STATUSES, TOPICS, Post, parse_bullet_line
+from .post import (CONFIDENCES, STATUSES, TOPICS, Post, parse_bullet_line,
+                   set_summary_in_raw)
 from .store import (
     INDEX_NAME, community_dir, list_posts, list_posts_with_errors, next_number,
     read_post, update_index, with_store_lock, write_post,
@@ -144,17 +145,27 @@ def comment(anchor_root, post_id, *, author, text, now):
     return with_store_lock(anchor_root, _do)
 
 
-def edit(anchor_root, post_id, *, new_body, reason, author, now):
+def edit(anchor_root, post_id, *, new_body, reason, author, now, new_summary=None):
     if not reason or not reason.strip():
         raise HqError("edit requires a non-empty reason")
+    if new_summary is not None and not new_summary.strip():
+        raise HqError("edit --summary requires a non-empty value")
 
     def _do():
         post = read_post(anchor_root, post_id)
         if _is_git_anchor(anchor_root):
             post.body = new_body
+            # `summary:` is the field INDEX.md and `hq query` surface, so a body
+            # correction that cannot reach it leaves the post advertising the claim
+            # it was just corrected for. Reindex with it -- edit did not touch the
+            # index before, which was safe only while nothing indexed could change.
+            if new_summary is not None:
+                set_summary_in_raw(post, new_summary)
             post.comments.append(f"({now}, {author}) 정정: {reason}")
             post.has_comments_section = True
             write_post(anchor_root, post)
+            if new_summary is not None:
+                update_index(anchor_root, _resolve_anchor_id(anchor_root), now)
             return {"id": post_id, "edited": True}
 
         subject = post.subject

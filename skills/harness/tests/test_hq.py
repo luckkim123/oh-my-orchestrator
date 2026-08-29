@@ -472,6 +472,45 @@ class ProjectFieldTest(unittest.TestCase):
             self.assertEqual(verbs.lint(root)["errors"], [])
 
 
+class EditSummaryTest(unittest.TestCase):
+    """`summary:` is what INDEX.md and `hq query` show, so a body correction that
+    cannot reach it leaves the post advertising the claim it was corrected for."""
+
+    def _git_anchor(self, root):
+        _write_anchor(root, "one-repo")
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+
+    def test_summary_is_replaced_and_reindexed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._git_anchor(root)
+            verbs.post_new(root, category="finding", title="T", author="t",
+                           summary="10 open leads", body="b", subject="s",
+                           topic="debugging", now="2026-08-29")
+            verbs.edit(root, "finding/001", new_body="corrected",
+                       reason="miscounted", author="t", now="2026-08-29",
+                       new_summary="5 open leads")
+            written = (root / ".hq/community/posts/finding/001-t.md").read_text("utf-8")
+            self.assertIn("summary: 5 open leads", written)
+            self.assertNotIn("10 open leads", written)
+            idx = (root / ".hq/community/INDEX.md").read_text("utf-8")
+            self.assertIn("5 open leads", idx)
+            self.assertNotIn("10 open leads", idx)
+            self.assertEqual(verbs.lint(root)["errors"], [])
+
+    def test_summary_is_optional(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._git_anchor(root)
+            verbs.post_new(root, category="finding", title="T", author="t",
+                           summary="kept", body="b", subject="s",
+                           topic="debugging", now="2026-08-29")
+            verbs.edit(root, "finding/001", new_body="corrected",
+                       reason="body only", author="t", now="2026-08-29")
+            written = (root / ".hq/community/posts/finding/001-t.md").read_text("utf-8")
+            self.assertIn("summary: kept", written)
+
+
 class VerifiedDefaultTest(unittest.TestCase):
     """`is_legacy` reads a missing `verified:` as pre-schema. So a post the
     supported writer produced without `--verified` warned on its own `hq lint`

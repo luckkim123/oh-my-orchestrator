@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-08-29 — a correction that cannot reach the summary is not a correction
+
+### Added
+- **`hq edit --summary`.** `edit` replaced the body and appended a `정정:` comment,
+  but had no way to touch `summary:` — the one field `INDEX.md` and `hq query`
+  actually show. A corrected post therefore kept advertising the claim it had just
+  been corrected for, which is the exact failure the "fix the body, fix its summary
+  in the same edit" rule exists to stop, made unenforceable by the tool.
+
+  Found within an hour of shipping `community`, by needing it: `finding/117` had
+  miscounted open backlog leads and the number was in both the body and the summary.
+
+  The fix needed a second layer. `serialize_post` echoes a parsed post's
+  `raw_prefix_lines` verbatim — the round-trip fidelity guarantee — so assigning
+  `post.fields["summary"]` was silently discarded. `post.set_summary_in_raw()` now
+  rewrites the summary segment of its own bullet and leaves every other line, and
+  every other segment of that line, byte-identical. `edit` also reindexes when the
+  summary changes; it did not touch the index before, which was safe only while
+  nothing it could change was indexed.
+
 ## [0.10.0] - 2026-08-29 — the board gets a front door
 
 ### Added

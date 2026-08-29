@@ -265,6 +265,32 @@ def _build_frontmatter_bullets(fields: dict) -> list:
     return out
 
 
+def set_summary_in_raw(post: Post, value: str) -> None:
+    """Rewrite `summary:` on a PARSED post, in `fields` and in the raw line.
+
+    The module docstring's invariant is that only body/comments mutate after a
+    parse, so `serialize_post` echoes `raw_prefix_lines` verbatim and assigning
+    `post.fields[...]` alone is silently discarded. `summary:` is the one field a
+    correction has to reach -- it is what INDEX.md and `hq query` show -- so it
+    gets this narrow exception. Only the summary segment of its own bullet is
+    replaced; every other line, and every other segment of that line, is left
+    byte-identical.
+    """
+    post.fields["summary"] = value
+    if post.raw_prefix_lines is None:      # freshly built -- fields are the source
+        return
+    for i, line in enumerate(post.raw_prefix_lines):
+        if not line.startswith("- "):
+            continue
+        segs = _split_paren_aware(line[2:], " · ")
+        for j, seg in enumerate(segs):
+            if seg.split(":", 1)[0].strip() == "summary":
+                segs[j] = f"summary: {value}"
+                post.raw_prefix_lines[i] = "- " + " · ".join(segs)
+                return
+    raise HqError(f"{post.fields.get('id', '?')} has no summary: line to replace")
+
+
 def serialize_post(post: Post) -> str:
     """Reproduce the §4 line grouping for a freshly built Post
     (raw_prefix_lines is None); echo the exact original title+frontmatter
