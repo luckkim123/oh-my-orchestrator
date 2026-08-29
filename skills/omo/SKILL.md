@@ -126,12 +126,17 @@ roles instead of seven.
 
 So before the first vendor call in a session:
 
-1. **Check the role's backend is on PATH** (`command -v codex`, `command -v claude`).
+1. **Check the entry point itself** -- `command -v codeagent-wrapper`. It is the
+   binary every consultation goes through, it ships as Go source rather than a
+   published artifact, and a machine that never ran `make build` has no vendor lane
+   at all. Checking only the backends passes a machine whose backends are perfect
+   and whose entry point does not exist.
+2. **Check the role's backend is on PATH** (`command -v codex`, `command -v claude`).
    A missing CLI is not an error to work around silently -- the call will fail with
    an exec error that reads like a bug in the wrapper.
-2. **If it is missing, say so and pick again.** Either route to a role whose backend
+3. **If either is missing, say so and pick again.** Either route to a role whose backend
    is present, or do the work yourself and name that you did.
-3. **Never install a vendor CLI on your own.** Installing codex or antigravity is a
+4. **Never install a vendor CLI on your own.** Installing codex or antigravity is a
    per-machine decision with an account and a cost attached. Ask; if the answer is
    no, that is a complete answer and the claude-backed roles carry the session.
 
