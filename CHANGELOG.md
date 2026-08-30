@@ -2,6 +2,68 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.0] - 2026-08-31 — the wrapper starts measuring what its roles cost
+
+The binding question — which role should run on which vendor — has been parked
+since round 4 for want of a denominator, and the operator's decision this round
+was to build the denominator before moving anything. So no binding changed.
+
+The premise turned out to be half wrong in a useful way. `codeagent-wrapper`
+already wrote a JSON line per call to `$TMPDIR`; what it never wrote was the
+role, the model, the tokens, or anything surviving seven days. This is four
+missing fields and a durable file, not new logging.
+
+### Added
+
+- `internal/ledger`: one JSON line per vendor call at `$CODEAGENT_LEDGER` or
+  `${XDG_STATE_HOME:-~/.local/state}/codeagent-wrapper/calls.jsonl`. Role,
+  backend, configured model, resolved model, effort, mode, workdir, exit, ok,
+  character counts, tokens, cost, duration, log path, pid. Best-effort by
+  contract: a write failure never touches the vendor call. Rows stay under
+  4096 B so cross-process `O_APPEND` stays atomic, and a row that cannot fit is
+  dropped rather than written.
+- Token usage from the two backends that report it. codex sends it on
+  `turn.completed`; claude sends it on its `result` event under different names
+  and adds `total_cost_usd` and `modelUsage` — all of which the parser had been
+  discarding. agy reports none, and its rows say so by omission.
+- `skills/omo/SKILL.md` ground 4 and `references/vendor-ops.md`: two vendor
+  families in parallel is a gate, not the default. Its conditions are a
+  release, a data-loss path, or a change that is hard to undo.
+
+### Changed
+
+- The ledger is wired with a single `defer`, not per-return. There are twelve
+  return points and most are failure paths; a missed one would drop failed
+  calls only — the worst possible bias for a measurement. A panic is corrected
+  and re-panicked rather than recorded as a clean exit.
+- `taskSpec.Backend` now sets the command as well as the argument builder when
+  the caller left the command at its default. Setting one without the other ran
+  the default binary with another vendor's flags.
+- Task and response text are never recorded — character counts only, in runes
+  rather than bytes. The wrapper handles arbitrary repository content, and the
+  `err` field now keeps the wrapper's own sentence without the vendor stderr
+  that `attachStderr` appends to it.
+
+### Verification
+
+- `go build`, `go vet`, `go test ./...` clean across 18 packages. Tests
+  401 → 429, files 53 → 57, none deleted.
+- Three mutations confirmed the new guards fire before they were trusted.
+- Live calls against codex, claude and agy each wrote a correct row; an
+  unwritable ledger left the vendor call at exit 0; a `go test ./...` that had
+  been leaving 65 rows in the real ledger now leaves none.
+
+### Notes
+
+- Cross-family adversarial verification on the release commit produced 26
+  claims, 16 reproduced and fixed, 2 rejected with reasons, and the rest
+  documented as boundaries. The two families barely overlapped — agy found the
+  ranking and criterion defects, codex the token accounting and a FIFO at the
+  ledger path that blocked every parallel task. That is the second sample
+  behind the gate added above, and it is still a sample of two.
+- A pre-flight rejection (unsupported backend, unreadable prompt file) leaves
+  no row because no vendor process ran.
+
 ## [0.18.0] - 2026-08-30 — the wiki form is retired, and the two-level read it promised arrives here
 
 The sibling harnesses (oms, omd, omp) each carried their own reader over

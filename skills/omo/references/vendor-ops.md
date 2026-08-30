@@ -58,6 +58,62 @@ not exist -- `buildClaudeArgs` never read `ReasoningEffort` -- so the `reasoning
 value on every claude-backed role was accepted, displayed, and dropped. If you are
 reading an older transcript, its claude calls all ran at the CLI default.
 
+## The call ledger: what a role actually costs
+
+Every vendor call appends one JSON line to
+`${XDG_STATE_HOME:-~/.local/state}/codeagent-wrapper/calls.jsonl`
+(`$CODEAGENT_LEDGER` overrides the path). This is the denominator the binding
+question needs -- "which role should run on which vendor" cannot be answered by
+argument, and until 2026-08-31 this repo had no way to answer it by measurement.
+
+One row, measured:
+
+```json
+{"ts":"2026-08-31T03:31:12.4+09:00","dur_ms":4799,"role":"librarian",
+ "backend":"claude","model":"claude-sonnet-5","model_resolved":"claude-sonnet-5",
+ "effort":"medium","mode":"new","workdir":"/tmp","exit":0,"ok":true,
+ "task_chars":32,"msg_chars":2,
+ "tokens":{"in":2,"cached_in":30158,"cached_write":3574,"out":4},
+ "cost_usd":0.0213176,"log":"/var/.../codeagent-wrapper-55564.log","pid":55564}
+```
+
+**An absent key means the backend did not say, and a zero means it said zero.**
+Only claude reports `cost_usd` and `model_resolved`; codex reports tokens but no
+cost; agy reports neither, so its rows carry no `tokens` at all. Never read a
+missing `cost_usd` as a free call.
+
+`model` is what the role was configured with; `model_resolved` is what actually
+served the turn, and they differ often enough to matter -- a claude turn also
+bills a cheap helper model alongside the one that answered, so the ledger
+records the model that carried the cost. `cached_write` is input written *into*
+a cache: claude bills it as fresh input and it dwarfs `in` on a cold call
+(60,680 against an `in` of 2, measured), so leaving it out understates claude by
+orders of magnitude.
+
+No verb reads this; `jq` is enough:
+
+```bash
+L=${CODEAGENT_LEDGER:-${XDG_STATE_HOME:-$HOME/.local/state}/codeagent-wrapper/calls.jsonl}
+jq -s 'group_by(.role)[] | {role: .[0].role, calls: length,
+       cost: (map(.cost_usd // 0) | add), secs: (map(.dur_ms) | add / 1000)}' "$L"
+jq -s 'group_by(.backend)[] | {backend: .[0].backend, calls: length,
+       failed: (map(select(.ok == false)) | length)}' "$L"
+```
+
+Three boundaries, so an empty answer is not mistaken for a zero:
+
+- **A call the wrapper rejected before starting a vendor leaves no row** -- an
+  unsupported `--backend`, an unreadable prompt file. Nothing ran, so nothing is
+  measured; failure *rates* here are rates of calls that launched.
+- **`go test` does not write to the real ledger**, and that guard compares
+  against the resolved default path rather than an unset variable -- exporting
+  `CODEAGENT_LEDGER` to your real ledger used to make every test run pollute it.
+  A test that spawns the wrapper as a subprocess is still outside the guard.
+- **Cross-process safety rests on `O_APPEND` atomicity**, which is why rows are
+  kept under 4096 B and an unfittable row is dropped rather than written. On a
+  filesystem that only emulates append (NFS, some FUSE mounts) concurrent
+  wrappers can still interleave.
+
 ## Reasoning effort: pick the tier, then the timeout
 
 The tier drives the cost and the wall clock, so set the shell timeout from the tier
