@@ -34,7 +34,7 @@ var lineScratchPool = sync.Pool{
 	},
 }
 
-func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(string), onMessage func(), onComplete func()) (message, threadID string) {
+func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(string), onMessage func(), onComplete func()) (message, threadID string, usage *Usage) {
 	reader := bufio.NewReaderSize(r, jsonLineReaderSize)
 	scratch := lineScratchPool.Get().(*lineScratch)
 	if scratch.buf == nil {
@@ -229,6 +229,7 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 				notifyComplete()
 
 			case "turn.completed":
+				usage = event.Usage
 				infoFn("turn.completed event")
 				notifyComplete()
 
@@ -277,6 +278,14 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 			}
 
 			if event.Type == "result" {
+				if event.Usage != nil {
+					// Copy, then graft on the two facts that sit beside the
+					// `usage` object rather than inside it.
+					u := *event.Usage
+					u.TotalCostUSD = event.TotalCostUSD
+					u.ResolvedModel = dominantModelKey(event.ModelUsage)
+					usage = &u
+				}
 				notifyComplete()
 			}
 			continue
@@ -327,7 +336,45 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 	}
 
 	infoFn(fmt.Sprintf("parseJSONStream completed: events=%d, message_len=%d, thread_id_found=%t", totalEvents, len(message), threadID != ""))
-	return message, threadID
+	return message, threadID, usage
+}
+
+// dominantModelKey names the model that did the work in a claude turn.
+//
+// `modelUsage` is not one model. Measured 2026-08-31 on a wrapper call: a turn
+// whose `total_cost_usd` was 0.0470 listed `claude-haiku-4-5` at 0.00095 -- two
+// percent -- so a cheap helper model rides along with the one that answered.
+// Returning "" whenever there is more than one key would leave the field empty
+// on ordinary calls, which is the same as not recording it.
+//
+// Cost picks the winner because it is what the field is for: "which model did
+// this role actually run on" is answered by the model that was billed for it,
+// not by whichever key a randomized map iteration reached first. A tie -- and
+// no keys, and unparseable values -- still returns "" rather than a coin flip.
+func dominantModelKey(m map[string]json.RawMessage) string {
+	var best string
+	var bestCost float64
+	tied := false
+
+	for k, raw := range m {
+		var v struct {
+			CostUSD float64 `json:"costUSD"`
+		}
+		if err := json.Unmarshal(raw, &v); err != nil {
+			continue
+		}
+		switch {
+		case best == "" || v.CostUSD > bestCost:
+			best, bestCost, tied = k, v.CostUSD, false
+		case v.CostUSD == bestCost:
+			tied = true
+		}
+	}
+
+	if tied {
+		return ""
+	}
+	return best
 }
 
 func HasKey(m map[string]json.RawMessage, key string) bool {

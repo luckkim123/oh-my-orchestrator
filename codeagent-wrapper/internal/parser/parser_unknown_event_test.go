@@ -16,7 +16,7 @@ func TestBackendParseJSONStream_UnknownEventsAreSilent(t *testing.T) {
 	var infos []string
 	infoFn := func(msg string) { infos = append(infos, msg) }
 
-	message, threadID := ParseJSONStreamInternal(strings.NewReader(input), nil, infoFn, nil, nil)
+	message, threadID, _ := ParseJSONStreamInternal(strings.NewReader(input), nil, infoFn, nil, nil)
 	if message != "ok" {
 		t.Fatalf("message=%q, want %q (infos=%v)", message, "ok", infos)
 	}

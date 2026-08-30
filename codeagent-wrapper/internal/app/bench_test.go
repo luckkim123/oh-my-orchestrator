@@ -75,7 +75,7 @@ func BenchmarkJSONParse_ParseJSONStreamInternal(b *testing.B) {
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		message, threadID := parseJSONStreamInternal(bytes.NewReader(stream), nil, nil, nil, nil)
+		message, threadID, _ := parseJSONStreamInternal(bytes.NewReader(stream), nil, nil, nil, nil)
 		benchMessageSink = message
 		benchThreadIDSink = threadID
 	}

@@ -18,10 +18,11 @@ func parseJSONStreamWithWarn(r io.Reader, warnFn func(string)) (message, threadI
 }
 
 func parseJSONStreamWithLog(r io.Reader, warnFn func(string), infoFn func(string)) (message, threadID string) {
-	return parseJSONStreamInternal(r, warnFn, infoFn, nil, nil)
+	message, threadID, _ = parseJSONStreamInternal(r, warnFn, infoFn, nil, nil)
+	return message, threadID
 }
 
-func parseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(string), onMessage func(), onComplete func()) (message, threadID string) {
+func parseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(string), onMessage func(), onComplete func()) (message, threadID string, usage *parser.Usage) {
 	return parser.ParseJSONStreamInternal(r, warnFn, infoFn, onMessage, onComplete)
 }
 

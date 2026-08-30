@@ -7,6 +7,39 @@ type JSONEvent struct {
 	Type     string     `json:"type"`
 	ThreadID string     `json:"thread_id,omitempty"`
 	Item     *EventItem `json:"item,omitempty"`
+	Usage    *Usage     `json:"usage,omitempty"`
+}
+
+// Usage is the token usage a backend reported for the turn.
+// The containing pointer distinguishes an absent usage object from zero usage.
+//
+// Two backends fill it and they do not agree on the field names. Codex emits
+// `cached_input_tokens` on `turn.completed`; claude emits the same idea split in
+// two on its `type:"result"` event -- `cache_read_input_tokens` for what a cache
+// served and `cache_creation_input_tokens` for what was written into one and
+// billed as fresh input. Decoding both names into one struct is why `CachedIn()`
+// exists: the caller wants "how much came from cache" without caring who said it.
+type Usage struct {
+	InputTokens              int `json:"input_tokens"`
+	CachedInputTokens        int `json:"cached_input_tokens"`         // codex
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`     // claude
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"` // claude
+	OutputTokens             int `json:"output_tokens"`
+
+	// Filled by the parser from the enclosing event, not from the `usage`
+	// object, so they are never decoded from it.
+	TotalCostUSD  float64 `json:"-"`
+	ResolvedModel string  `json:"-"`
+}
+
+// CachedIn is the input tokens a cache served, under whichever name the backend
+// used. Cache *creation* is deliberately excluded: those tokens were charged as
+// fresh input, so counting them as cached would understate what the call cost.
+func (u Usage) CachedIn() int {
+	if u.CachedInputTokens != 0 {
+		return u.CachedInputTokens
+	}
+	return u.CacheReadInputTokens
 }
 
 // EventItem represents the item field in a JSON event.
@@ -43,10 +76,19 @@ type UnifiedEvent struct {
 	ThreadID string          `json:"thread_id,omitempty"`
 	Item     json.RawMessage `json:"item,omitempty"` // Lazy parse
 
+	// Shared: codex puts `usage` on `turn.completed`, claude on `type:"result"`.
+	Usage *Usage `json:"usage,omitempty"`
+
 	// Claude-specific fields
 	Subtype   string `json:"subtype,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
 	Result    string `json:"result,omitempty"`
+	// Only claude reports what the turn cost and which model actually served
+	// it. `modelUsage` is keyed by the resolved name (`claude-opus-5[1m]`),
+	// which can differ from the model string the role was configured with --
+	// and that difference is the whole reason to record it.
+	TotalCostUSD float64                    `json:"total_cost_usd,omitempty"`
+	ModelUsage   map[string]json.RawMessage `json:"modelUsage,omitempty"`
 
 	// Gemini-specific fields
 	Role    string `json:"role,omitempty"`

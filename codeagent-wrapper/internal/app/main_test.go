@@ -2650,7 +2650,7 @@ func TestBackendParseJSONStream_GeminiEvents_OnMessageTriggeredOnStatus(t *testi
 {"type":"result","status":"success","session_id":"xyz789"}`
 
 	var called int
-	message, threadID := parseJSONStreamInternal(strings.NewReader(input), nil, nil, func() {
+	message, threadID, _ := parseJSONStreamInternal(strings.NewReader(input), nil, nil, func() {
 		called++
 	}, nil)
 
@@ -2679,7 +2679,7 @@ func TestBackendParseJSONStreamWithWarn_InvalidLine(t *testing.T) {
 
 func TestBackendParseJSONStream_OnMessage(t *testing.T) {
 	var called int
-	message, threadID := parseJSONStreamInternal(strings.NewReader(`{"type":"item.completed","item":{"type":"agent_message","text":"hook"}}`), nil, nil, func() {
+	message, threadID, _ := parseJSONStreamInternal(strings.NewReader(`{"type":"item.completed","item":{"type":"agent_message","text":"hook"}}`), nil, nil, func() {
 		called++
 	}, nil)
 	if message != "hook" {
@@ -2700,7 +2700,7 @@ func TestBackendParseJSONStream_OnComplete_CodexThreadCompleted(t *testing.T) {
 
 	var onMessageCalls int
 	var onCompleteCalls int
-	message, threadID := parseJSONStreamInternal(strings.NewReader(input), nil, nil, func() {
+	message, threadID, _ := parseJSONStreamInternal(strings.NewReader(input), nil, nil, func() {
 		onMessageCalls++
 	}, func() {
 		onCompleteCalls++
@@ -2725,7 +2725,7 @@ func TestBackendParseJSONStream_OnComplete_ClaudeResult(t *testing.T) {
 
 	var onMessageCalls int
 	var onCompleteCalls int
-	message, threadID := parseJSONStreamInternal(strings.NewReader(input), nil, nil, func() {
+	message, threadID, _ := parseJSONStreamInternal(strings.NewReader(input), nil, nil, func() {
 		onMessageCalls++
 	}, func() {
 		onCompleteCalls++
@@ -2750,7 +2750,7 @@ func TestBackendParseJSONStream_OnComplete_GeminiTerminalResultStatus(t *testing
 
 	var onMessageCalls int
 	var onCompleteCalls int
-	message, threadID := parseJSONStreamInternal(strings.NewReader(input), nil, nil, func() {
+	message, threadID, _ := parseJSONStreamInternal(strings.NewReader(input), nil, nil, func() {
 		onMessageCalls++
 	}, func() {
 		onCompleteCalls++
@@ -2772,7 +2772,7 @@ func TestBackendParseJSONStream_OnComplete_GeminiTerminalResultStatus(t *testing
 func TestBackendParseJSONStream_ScannerError(t *testing.T) {
 	var warnings []string
 	warnFn := func(msg string) { warnings = append(warnings, msg) }
-	message, threadID := parseJSONStreamInternal(errReader{err: errors.New("scan-fail")}, warnFn, nil, nil, nil)
+	message, threadID, _ := parseJSONStreamInternal(errReader{err: errors.New("scan-fail")}, warnFn, nil, nil, nil)
 	if message != "" || threadID != "" {
 		t.Fatalf("expected empty output on scanner error, got message=%q threadID=%q", message, threadID)
 	}

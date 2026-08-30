@@ -62,6 +62,20 @@ made**: undecided work stays, decided work goes.
    on your own family, but it cannot catch a role that was already bound there.
    Details in `references/vendor-ops.md`.
 
+   **One family is the default; two families in parallel is a gate.** Open it when
+   the change is about to ship in a release, when it touches a path where data can
+   be lost, or when it is hard to undo — otherwise one verifier is enough. Open
+   means sending the *same* prompt against the *same* commit to two different vendor
+   families at once. Measured 2026-08-30 on commit `b781d4a`: codex and agy run that
+   way returned 11 reproducible defects with almost no overlap — agy found parser and
+   boundary faults, codex found contract and side-effect faults. The cost is not two
+   verifications of one axis, it is one verification of two axes.
+
+   That is a sample of one, and the two axes were named afterward rather than
+   assigned in advance, so it is a reason to run the gate — not a measured profile of
+   either vendor. **Do not widen the conditions.** "It ships, but it is a small
+   change" is not a narrower reading of the gate; it is the gate inverted.
+
 ### Not grounds for delegation
 
 - **"The design isn't settled yet."** Then it is not ground 1. A vendor handed an

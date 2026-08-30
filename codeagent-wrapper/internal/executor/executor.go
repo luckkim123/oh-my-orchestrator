@@ -18,6 +18,7 @@ import (
 
 	backend "codeagent-wrapper/internal/backend"
 	config "codeagent-wrapper/internal/config"
+	ledger "codeagent-wrapper/internal/ledger"
 	ilogger "codeagent-wrapper/internal/logger"
 	parser "codeagent-wrapper/internal/parser"
 	utils "codeagent-wrapper/internal/utils"
@@ -127,7 +128,7 @@ func logConcurrencyState(event, taskID string, active, limit int) {
 	ilogger.LogConcurrencyState(event, taskID, active, limit)
 }
 
-func parseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(string), onMessage func(), onComplete func()) (message, threadID string) {
+func parseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(string), onMessage func(), onComplete func()) (message, threadID string, usage *parser.Usage) {
 	return parser.ParseJSONStreamInternal(r, warnFn, infoFn, onMessage, onComplete)
 }
 
@@ -333,6 +334,7 @@ var newCommandRunner = func(ctx context.Context, name string, args ...string) co
 type parseResult struct {
 	message  string
 	threadID string
+	usage    *parser.Usage
 }
 
 type taskLoggerContextKey struct{}
@@ -846,7 +848,76 @@ func buildCodexArgs(cfg *Config, targetArg string) []string {
 	return backend.BuildCodexArgs(cfg, targetArg)
 }
 
-func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backend Backend, defaultCommandName string, defaultArgsBuilder func(*Config, string) []string, customArgs []string, useCustomArgs bool, silent bool, timeoutSec int) TaskResult {
+func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backend Backend, defaultCommandName string, defaultArgsBuilder func(*Config, string) []string, customArgs []string, useCustomArgs bool, silent bool, timeoutSec int) (result TaskResult) {
+	ledgerStartedAt := time.Now()
+	var (
+		cfg         *Config
+		commandName string
+		parsedUsage *parser.Usage
+	)
+	defer func() {
+		// `cfg.Backend` is initialised to the "codex" constant and then
+		// resolved below (backend.Name, else taskSpec.Backend, else
+		// commandName), so by the time this runs it names the vendor that
+		// actually ran. Read it first: on the parallel path `taskSpec.Backend`
+		// is the only place a per-task `--backend` override survives, and
+		// `commandName` would miss it. Fall back to commandName only for a
+		// return that beat the resolution.
+		backendName := defaultBackendName
+		if cfg != nil && strings.TrimSpace(cfg.Backend) != "" {
+			backendName = cfg.Backend
+		} else if strings.TrimSpace(commandName) != "" {
+			backendName = commandName
+		}
+
+		exitCode, errText := result.ExitCode, result.Error
+		if r := recover(); r != nil {
+			// A panic leaves the named return at its zero value, which would
+			// be written down as exit 0 / ok true -- a failed call recorded as
+			// a clean one. Correct it, then re-panic so the recovery in
+			// ExecuteConcurrentWithContext still sees it.
+			exitCode, errText = 1, fmt.Sprintf("panic: %v", r)
+			defer panic(r)
+		}
+
+		var tokens *ledger.Tokens
+		var costUSD float64
+		var modelResolved string
+		if parsedUsage != nil {
+			tokens = &ledger.Tokens{
+				In:       parsedUsage.InputTokens,
+				CachedIn: parsedUsage.CachedIn(),
+				Out:      parsedUsage.OutputTokens,
+			}
+			costUSD = parsedUsage.TotalCostUSD
+			modelResolved = parsedUsage.ResolvedModel
+		}
+
+		call := ledger.Call{
+			Timestamp:     ledgerStartedAt,
+			Duration:      time.Since(ledgerStartedAt),
+			Role:          taskSpec.Agent,
+			Backend:       backendName,
+			Exit:          exitCode,
+			OK:            exitCode == 0,
+			TaskChars:     len(taskSpec.Task),
+			MsgChars:      len(result.Message),
+			Tokens:        tokens,
+			CostUSD:       costUSD,
+			ModelResolved: modelResolved,
+			Log:           result.LogPath,
+			PID:           os.Getpid(),
+			Err:           errText,
+		}
+		if cfg != nil {
+			call.Model = cfg.Model
+			call.Effort = cfg.ReasoningEffort
+			call.Mode = cfg.Mode
+			call.WorkDir = cfg.WorkDir
+		}
+		ledger.Record(call)
+	}()
+
 	// timeoutSec is accepted and deliberately ignored: the wrapper waits for the
 	// vendor process to exit and lets the caller's shell own the wall clock, which
 	// is what `skills/omo/references/vendor-ops.md` documents (there is no
@@ -862,14 +933,14 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		parentCtx = context.Background()
 	}
 
-	result := TaskResult{TaskID: taskSpec.ID}
+	result = TaskResult{TaskID: taskSpec.ID}
 	injectedLogger := taskLoggerFromContext(taskCtx)
 	if injectedLogger == nil {
 		injectedLogger = taskLoggerFromContext(parentCtx)
 	}
 	logger := injectedLogger
 
-	cfg := &Config{
+	cfg = &Config{
 		Mode:            taskSpec.Mode,
 		Task:            taskSpec.Task,
 		SessionID:       taskSpec.SessionID,
@@ -884,7 +955,7 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		DisallowedTools: taskSpec.DisallowedTools,
 	}
 
-	commandName := strings.TrimSpace(defaultCommandName)
+	commandName = strings.TrimSpace(defaultCommandName)
 	if commandName == "" {
 		commandName = defaultBackendName
 	}
@@ -1238,7 +1309,7 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 	// can surface backend activity while the process is still running.
 	parseCh := make(chan parseResult, 1)
 	go func() {
-		msg, tid := parseJSONStreamInternal(stdoutReader, logWarnFn, logInfoFn, func() {
+		msg, tid, usage := parseJSONStreamInternal(stdoutReader, logWarnFn, logInfoFn, func() {
 			if firstMessageSeen.CompareAndSwap(false, true) {
 				emitProgress(silent, "streaming", taskSpec, commandName, result.LogPath, 0)
 			}
@@ -1247,11 +1318,11 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 				emitProgress(silent, "backend-complete", taskSpec, commandName, result.LogPath, 0)
 			}
 		})
-		parseCh <- parseResult{message: msg, threadID: tid}
+		parseCh <- parseResult{message: msg, threadID: tid, usage: usage}
 	}()
 
 	var heartbeat <-chan time.Time
-	startedAt := time.Now()
+	progressStartedAt := time.Now()
 	if interval := progressInterval(); interval > 0 {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -1272,7 +1343,7 @@ waitLoop:
 			waitErr = err
 			break waitLoop
 		case <-heartbeat:
-			emitProgress(silent, "running", taskSpec, commandName, result.LogPath, time.Since(startedAt))
+			emitProgress(silent, "running", taskSpec, commandName, result.LogPath, time.Since(progressStartedAt))
 		case <-ctx.Done():
 			ctxCancelled = true
 			logErrorFn(cancelReason(commandName, ctx))
@@ -1306,6 +1377,7 @@ waitLoop:
 		closeWithReason(stdout, stdoutCloseReasonWait)
 	}
 	parsed := <-parseCh
+	parsedUsage = parsed.usage
 
 	closeWithReason(stderr, stdoutCloseReasonWait)
 	// Wait for stderr drain so stderrBuf / stderrLogger are not accessed concurrently.
@@ -1316,7 +1388,7 @@ waitLoop:
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		result.ExitCode = 130
 		result.Error = attachStderr("execution cancelled")
-		emitProgress(silent, "cancelled", taskSpec, commandName, result.LogPath, time.Since(startedAt))
+		emitProgress(silent, "cancelled", taskSpec, commandName, result.LogPath, time.Since(progressStartedAt))
 		return result
 	}
 
@@ -1335,13 +1407,13 @@ waitLoop:
 			if stderrLogger != nil {
 				stderrLogger.Flush()
 			}
-			emitProgress(silent, "failed", taskSpec, commandName, result.LogPath, time.Since(startedAt))
+			emitProgress(silent, "failed", taskSpec, commandName, result.LogPath, time.Since(progressStartedAt))
 			return result
 		}
 		logErrorFn(commandName + " error: " + waitErr.Error())
 		result.ExitCode = 1
 		result.Error = attachStderr(commandName + " error: " + waitErr.Error())
-		emitProgress(silent, "failed", taskSpec, commandName, result.LogPath, time.Since(startedAt))
+		emitProgress(silent, "failed", taskSpec, commandName, result.LogPath, time.Since(progressStartedAt))
 		return result
 	}
 
@@ -1351,7 +1423,7 @@ waitLoop:
 		logErrorFn(fmt.Sprintf("%s completed without agent_message output", commandName))
 		result.ExitCode = 1
 		result.Error = attachStderr(fmt.Sprintf("%s completed without agent_message output", commandName))
-		emitProgress(silent, "failed", taskSpec, commandName, result.LogPath, time.Since(startedAt))
+		emitProgress(silent, "failed", taskSpec, commandName, result.LogPath, time.Since(progressStartedAt))
 		return result
 	}
 
@@ -1368,7 +1440,7 @@ waitLoop:
 	if result.LogPath == "" && injectedLogger != nil {
 		result.LogPath = injectedLogger.Path()
 	}
-	emitProgress(silent, "completed", taskSpec, commandName, result.LogPath, time.Since(startedAt))
+	emitProgress(silent, "completed", taskSpec, commandName, result.LogPath, time.Since(progressStartedAt))
 
 	return result
 }

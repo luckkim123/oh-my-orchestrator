@@ -123,6 +123,32 @@ The check belongs to the session, every time.
 `oracle` is Claude and `security` is GPT deliberately. When `oracle` has failed
 twice, the escape has somewhere to go.
 
+### Two families in parallel is a gate, not the default
+
+`SKILL.md` ground 4 states the conditions -- shipping in a release, a path where
+data can be lost, a change that is hard to undo. This is the operational half.
+
+Open the gate by sending the same prompt against the same commit to two vendor
+families at once, and read both before judging either:
+
+```bash
+codeagent-wrapper --agent oracle --backend codex - "$PWD" < attack.txt > out-codex.txt &
+codeagent-wrapper --agent oracle --backend agy   - "$PWD" < attack.txt > out-agy.txt   &
+wait
+```
+
+Number every claim from both and record CONFIRMED or rejected **with a reason for
+the rejections too** -- a finding dismissed without one is indistinguishable from a
+finding nobody read. Measured 2026-08-30 on `b781d4a`: 11 defects reproduced and
+fixed, 2 rejected with reasons, almost no overlap between the two families.
+
+Two cautions come with it. `agy` serves `claude-sonnet-4-6` and
+`claude-opus-4-6-thinking` alongside its Gemini models, so "codex, then agy" can
+land back in the family that authored the work -- check what the backend resolved
+to, not what its name suggests. And when both families run, the fair comparison is
+the *union* of findings, not each one's hit rate: they are being paid for because
+they miss different things.
+
 ### What is installed is a per-machine fact -- measure it, do not read it
 
 The table below is one machine's measurement, kept as a worked example of what the

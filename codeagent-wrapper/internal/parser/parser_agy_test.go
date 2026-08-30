@@ -11,7 +11,7 @@ import (
 func TestParseAgyResult(t *testing.T) {
 	input := `{"conversation_id":"11111111-2222-3333-4444-555555555555","status":"SUCCESS","response":"the answer\n","duration_seconds":1.9,"num_turns":1}` + "\n"
 
-	message, threadID := ParseJSONStreamInternal(strings.NewReader(input), nil, nil, nil, nil)
+	message, threadID, _ := ParseJSONStreamInternal(strings.NewReader(input), nil, nil, nil, nil)
 
 	if message != "the answer\n" {
 		t.Errorf("message = %q, want %q", message, "the answer\n")
@@ -28,7 +28,7 @@ func TestParseAgyErrorSurfacesAsMessage(t *testing.T) {
 	input := `{"conversation_id":"","status":"ERROR","response":"","error":"invalid --effort \"xhigh\" (valid: low, medium, high)"}` + "\n"
 
 	var warnings []string
-	message, threadID := ParseJSONStreamInternal(
+	message, threadID, _ := ParseJSONStreamInternal(
 		strings.NewReader(input),
 		func(s string) { warnings = append(warnings, s) },
 		nil, nil, nil,
@@ -51,7 +51,7 @@ func TestParseAgyErrorSurfacesAsMessage(t *testing.T) {
 func TestParseAgyNotSwallowedByGeminiBranch(t *testing.T) {
 	input := `{"conversation_id":"abc","status":"SUCCESS","response":"agy spoke"}` + "\n"
 
-	message, _ := ParseJSONStreamInternal(strings.NewReader(input), nil, nil, nil, nil)
+	message, _, _ := ParseJSONStreamInternal(strings.NewReader(input), nil, nil, nil, nil)
 
 	if message != "agy spoke" {
 		t.Fatalf("message = %q, want %q — the gemini branch has taken the agy event", message, "agy spoke")
@@ -67,7 +67,7 @@ func TestParseGeminiStillRoutesToGeminiBranch(t *testing.T) {
 		`{"type":"result","status":"success"}`,
 	}, "\n") + "\n"
 
-	message, threadID := ParseJSONStreamInternal(strings.NewReader(input), nil, nil, nil, nil)
+	message, threadID, _ := ParseJSONStreamInternal(strings.NewReader(input), nil, nil, nil, nil)
 
 	if message != "gemini spoke" {
 		t.Errorf("message = %q, want %q", message, "gemini spoke")
