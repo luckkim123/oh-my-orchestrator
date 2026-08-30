@@ -282,7 +282,9 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 					// Copy, then graft on the two facts that sit beside the
 					// `usage` object rather than inside it.
 					u := *event.Usage
-					u.TotalCostUSD = event.TotalCostUSD
+					if event.TotalCostUSD != nil {
+						u.TotalCostUSD, u.CostReported = *event.TotalCostUSD, true
+					}
 					u.ResolvedModel = dominantModelKey(event.ModelUsage)
 					usage = &u
 				}
@@ -352,29 +354,48 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 // not by whichever key a randomized map iteration reached first. A tie -- and
 // no keys, and unparseable values -- still returns "" rather than a coin flip.
 func dominantModelKey(m map[string]json.RawMessage) string {
-	var best string
-	var bestCost float64
-	tied := false
+	type candidate struct {
+		key    string
+		cost   float64
+		tokens int
+	}
+
+	var best candidate
+	found, tied := false, false
 
 	for k, raw := range m {
 		var v struct {
-			CostUSD float64 `json:"costUSD"`
+			CostUSD      float64 `json:"costUSD"`
+			InputTokens  int     `json:"inputTokens"`
+			OutputTokens int     `json:"outputTokens"`
 		}
 		if err := json.Unmarshal(raw, &v); err != nil {
 			continue
 		}
+		c := candidate{k, v.CostUSD, v.InputTokens + v.OutputTokens}
+
+		// `found`, not `best.key != ""`: a map whose winning key is the empty
+		// string would otherwise read as "nothing chosen yet" and let a
+		// cheaper model overwrite it.
 		switch {
-		case best == "" || v.CostUSD > bestCost:
-			best, bestCost, tied = k, v.CostUSD, false
-		case v.CostUSD == bestCost:
+		case !found, c.cost > best.cost:
+			best, found, tied = c, true, false
+		case c.cost < best.cost:
+			// keep what we have
+		case c.tokens > best.tokens:
+			// Equal cost is common and does not mean "no answer": a fully
+			// cached or promotional turn prices every model at zero. Token
+			// volume then says which one did the work.
+			best, tied = c, false
+		case c.tokens == best.tokens:
 			tied = true
 		}
 	}
 
-	if tied {
+	if !found || tied {
 		return ""
 	}
-	return best
+	return best.key
 }
 
 func HasKey(m map[string]json.RawMessage, key string) bool {

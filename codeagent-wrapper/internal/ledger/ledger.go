@@ -2,6 +2,7 @@
 package ledger
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,30 +52,35 @@ type Call struct {
 	// ModelResolved is what actually served the turn. The two differ often
 	// enough (`claude-opus-5` vs `claude-opus-5[1m]`) that comparing roles on
 	// the configured string alone compares labels rather than models.
-	CostUSD       float64
+	//
+	// CostUSD is a pointer for the same reason Tokens is: a fully cached turn
+	// can genuinely cost 0, and "the backend said zero" is a different fact
+	// from "the backend does not report cost" -- which is every call codex and
+	// agy make. A bare float64 with omitempty erases that difference silently.
+	CostUSD       *float64
 	ModelResolved string
 }
 
 type entry struct {
-	Timestamp     string  `json:"ts"`
-	Duration      int64   `json:"dur_ms"`
-	Role          string  `json:"role,omitempty"`
-	Backend       string  `json:"backend"`
-	Model         string  `json:"model,omitempty"`
-	ModelResolved string  `json:"model_resolved,omitempty"`
-	Effort        string  `json:"effort,omitempty"`
-	Mode          string  `json:"mode,omitempty"`
-	WorkDir       string  `json:"workdir,omitempty"`
-	Exit          int     `json:"exit"`
-	OK            bool    `json:"ok"`
-	TaskChars     int     `json:"task_chars"`
-	MsgChars      int     `json:"msg_chars"`
-	Tokens        *Tokens `json:"tokens,omitempty"`
-	CostUSD       float64 `json:"cost_usd,omitempty"`
-	Log           string  `json:"log,omitempty"`
-	PID           int     `json:"pid"`
-	Err           string  `json:"err,omitempty"`
-	Truncated     bool    `json:"truncated,omitempty"`
+	Timestamp     string   `json:"ts"`
+	Duration      int64    `json:"dur_ms"`
+	Role          string   `json:"role,omitempty"`
+	Backend       string   `json:"backend"`
+	Model         string   `json:"model,omitempty"`
+	ModelResolved string   `json:"model_resolved,omitempty"`
+	Effort        string   `json:"effort,omitempty"`
+	Mode          string   `json:"mode,omitempty"`
+	WorkDir       string   `json:"workdir,omitempty"`
+	Exit          int      `json:"exit"`
+	OK            bool     `json:"ok"`
+	TaskChars     int      `json:"task_chars"`
+	MsgChars      int      `json:"msg_chars"`
+	Tokens        *Tokens  `json:"tokens,omitempty"`
+	CostUSD       *float64 `json:"cost_usd,omitempty"`
+	Log           string   `json:"log,omitempty"`
+	PID           int      `json:"pid"`
+	Err           string   `json:"err,omitempty"`
+	Truncated     bool     `json:"truncated,omitempty"`
 }
 
 // Record appends a call record. Ledger failures are deliberately best-effort so
@@ -180,9 +186,22 @@ func marshalLine(call Call) ([]byte, error) {
 		}
 
 		e.Truncated = true
-		if !shortenLongest(&e) {
-			return line, nil
+		if shortenLongest(&e) {
+			continue
 		}
+
+		// Every shortenable field is already empty and the row still does not
+		// fit. Only `backend` can still be long -- one resolved from a command
+		// *path* rather than a name. Cut it to its last path element, and if
+		// even that leaves the row oversized, give up on the row rather than on
+		// the file: a line past 4096 B is no longer an atomic append, so
+		// writing it would let concurrent wrappers interleave and corrupt every
+		// row around it. A dropped row costs one measurement.
+		if trimmed := filepath.Base(e.Backend); trimmed != e.Backend && trimmed != "." {
+			e.Backend = trimmed
+			continue
+		}
+		return nil, fmt.Errorf("record does not fit in %d bytes even when reduced", maxLineBytes)
 	}
 }
 

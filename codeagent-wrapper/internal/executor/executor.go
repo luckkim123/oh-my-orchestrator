@@ -881,7 +881,7 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		}
 
 		var tokens *ledger.Tokens
-		var costUSD float64
+		var costUSD *float64
 		var modelResolved string
 		if parsedUsage != nil {
 			tokens = &ledger.Tokens{
@@ -889,17 +889,25 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 				CachedIn: parsedUsage.CachedIn(),
 				Out:      parsedUsage.OutputTokens,
 			}
-			costUSD = parsedUsage.TotalCostUSD
+			if parsedUsage.CostReported {
+				cost := parsedUsage.TotalCostUSD
+				costUSD = &cost
+			}
 			modelResolved = parsedUsage.ResolvedModel
 		}
 
 		call := ledger.Call{
-			Timestamp:     ledgerStartedAt,
-			Duration:      time.Since(ledgerStartedAt),
-			Role:          taskSpec.Agent,
-			Backend:       backendName,
-			Exit:          exitCode,
-			OK:            exitCode == 0,
+			Timestamp: ledgerStartedAt,
+			Duration:  time.Since(ledgerStartedAt),
+			Role:      taskSpec.Agent,
+			Backend:   backendName,
+			Exit:      exitCode,
+			// The same criterion the wrapper's own reporting uses -- the
+			// failure test in ExecuteConcurrentWithContext and the success
+			// count in GenerateFinalOutputWithMode both read
+			// `ExitCode != 0 || Error != ""`. A ledger that disagreed would
+			// report a success rate the run itself denies.
+			OK:            exitCode == 0 && strings.TrimSpace(errText) == "",
 			TaskChars:     len(taskSpec.Task),
 			MsgChars:      len(result.Message),
 			Tokens:        tokens,
@@ -907,7 +915,12 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 			ModelResolved: modelResolved,
 			Log:           result.LogPath,
 			PID:           os.Getpid(),
-			Err:           errText,
+			// Only the wrapper's own sentence. `attachStderr` appends up to
+			// 4 KB of captured vendor stderr to every error it builds, and
+			// vendor stderr quotes prompts and file content -- putting that in
+			// a durable file is the leak the counts-not-content rule exists to
+			// prevent. The full text stays in the per-call log.
+			Err: wrapperErrorOnly(errText),
 		}
 		if cfg != nil {
 			call.Model = cfg.Model
@@ -950,7 +963,7 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		SkipPermissions: taskSpec.SkipPermissions,
 		Yolo:            taskSpec.Yolo,
 		YoloSet:         taskSpec.YoloSet,
-		Backend:         defaultBackendName,
+		Backend:         seedBackend(taskSpec.Backend),
 		AllowedTools:    taskSpec.AllowedTools,
 		DisallowedTools: taskSpec.DisallowedTools,
 	}
@@ -1443,6 +1456,27 @@ waitLoop:
 	emitProgress(silent, "completed", taskSpec, commandName, result.LogPath, time.Since(progressStartedAt))
 
 	return result
+}
+
+// wrapperErrorOnly strips the vendor stderr that attachStderr appends to every
+// error message it builds ("<msg>; stderr: <up to 4 KB of vendor output>").
+// The wrapper's own half names what went wrong; the vendor's half is arbitrary
+// content from the repository under work and does not belong in a durable file.
+func wrapperErrorOnly(msg string) string {
+	if i := strings.Index(msg, "; stderr: "); i >= 0 {
+		return msg[:i]
+	}
+	return msg
+}
+
+// seedBackend gives cfg.Backend a value before the resolution below runs, so a
+// panic in between is recorded against the vendor the caller asked for rather
+// than against the default. The resolution overwrites it either way.
+func seedBackend(specBackend string) string {
+	if b := strings.TrimSpace(specBackend); b != "" {
+		return b
+	}
+	return defaultBackendName
 }
 
 func injectTempEnv(cmd commandRunner) {

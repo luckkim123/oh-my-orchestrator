@@ -27,8 +27,12 @@ type Usage struct {
 	OutputTokens             int `json:"output_tokens"`
 
 	// Filled by the parser from the enclosing event, not from the `usage`
-	// object, so they are never decoded from it.
+	// object, so they are never decoded from it. CostReported carries the
+	// distinction a bare float cannot: a fully cached turn can genuinely cost
+	// zero, and that is a different fact from a backend that never reports
+	// cost at all -- which is every codex and agy call.
 	TotalCostUSD  float64 `json:"-"`
+	CostReported  bool    `json:"-"`
 	ResolvedModel string  `json:"-"`
 }
 
@@ -87,7 +91,7 @@ type UnifiedEvent struct {
 	// it. `modelUsage` is keyed by the resolved name (`claude-opus-5[1m]`),
 	// which can differ from the model string the role was configured with --
 	// and that difference is the whole reason to record it.
-	TotalCostUSD float64                    `json:"total_cost_usd,omitempty"`
+	TotalCostUSD *float64                   `json:"total_cost_usd,omitempty"`
 	ModelUsage   map[string]json.RawMessage `json:"modelUsage,omitempty"`
 
 	// Gemini-specific fields
