@@ -56,25 +56,25 @@ type Call struct {
 }
 
 type entry struct {
-	Timestamp string  `json:"ts"`
-	Duration  int64   `json:"dur_ms"`
-	Role          string `json:"role,omitempty"`
-	Backend       string `json:"backend"`
-	Model         string `json:"model,omitempty"`
-	ModelResolved string `json:"model_resolved,omitempty"`
-	Effort        string `json:"effort,omitempty"`
-	Mode      string  `json:"mode,omitempty"`
-	WorkDir   string  `json:"workdir,omitempty"`
-	Exit      int     `json:"exit"`
-	OK        bool    `json:"ok"`
-	TaskChars int     `json:"task_chars"`
-	MsgChars  int     `json:"msg_chars"`
-	Tokens    *Tokens `json:"tokens,omitempty"`
-	CostUSD   float64 `json:"cost_usd,omitempty"`
-	Log       string  `json:"log,omitempty"`
-	PID       int     `json:"pid"`
-	Err       string  `json:"err,omitempty"`
-	Truncated bool    `json:"truncated,omitempty"`
+	Timestamp     string  `json:"ts"`
+	Duration      int64   `json:"dur_ms"`
+	Role          string  `json:"role,omitempty"`
+	Backend       string  `json:"backend"`
+	Model         string  `json:"model,omitempty"`
+	ModelResolved string  `json:"model_resolved,omitempty"`
+	Effort        string  `json:"effort,omitempty"`
+	Mode          string  `json:"mode,omitempty"`
+	WorkDir       string  `json:"workdir,omitempty"`
+	Exit          int     `json:"exit"`
+	OK            bool    `json:"ok"`
+	TaskChars     int     `json:"task_chars"`
+	MsgChars      int     `json:"msg_chars"`
+	Tokens        *Tokens `json:"tokens,omitempty"`
+	CostUSD       float64 `json:"cost_usd,omitempty"`
+	Log           string  `json:"log,omitempty"`
+	PID           int     `json:"pid"`
+	Err           string  `json:"err,omitempty"`
+	Truncated     bool    `json:"truncated,omitempty"`
 }
 
 // Record appends a call record. Ledger failures are deliberately best-effort so
