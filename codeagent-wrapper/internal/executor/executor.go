@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	backend "codeagent-wrapper/internal/backend"
 	config "codeagent-wrapper/internal/config"
@@ -884,10 +885,18 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		var costUSD *float64
 		var modelResolved string
 		if parsedUsage != nil {
-			tokens = &ledger.Tokens{
-				In:       parsedUsage.InputTokens,
-				CachedIn: parsedUsage.CachedIn(),
-				Out:      parsedUsage.OutputTokens,
+			if parsedUsage.TokensReported {
+				tokens = &ledger.Tokens{
+					In:       parsedUsage.InputTokens,
+					CachedIn: parsedUsage.CachedIn(),
+					// Cache *creation* is billed as fresh input and is the
+					// largest number claude reports on a cold call -- 60,680
+					// against an input_tokens of 2, measured. Dropping it
+					// understated claude's input by four orders of magnitude
+					// and made the two backends' `in` incomparable.
+					CacheWrite: parsedUsage.CacheCreationInputTokens,
+					Out:        parsedUsage.OutputTokens,
+				}
 			}
 			if parsedUsage.CostReported {
 				cost := parsedUsage.TotalCostUSD
@@ -907,9 +916,12 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 			// count in GenerateFinalOutputWithMode both read
 			// `ExitCode != 0 || Error != ""`. A ledger that disagreed would
 			// report a success rate the run itself denies.
-			OK:            exitCode == 0 && strings.TrimSpace(errText) == "",
-			TaskChars:     len(taskSpec.Task),
-			MsgChars:      len(result.Message),
+			OK: exitCode == 0 && strings.TrimSpace(errText) == "",
+			// Runes, not bytes: the field is named for characters, and
+			// `len` would report a 1,000-character Korean task as 3,000 and
+			// silently inflate every per-language comparison.
+			TaskChars:     utf8.RuneCountInString(taskSpec.Task),
+			MsgChars:      utf8.RuneCountInString(result.Message),
 			Tokens:        tokens,
 			CostUSD:       costUSD,
 			ModelResolved: modelResolved,
@@ -984,6 +996,11 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		cfg.Backend = taskSpec.Backend
 		if selectBackendFn != nil {
 			if b, err := selectBackendFn(taskSpec.Backend); err == nil {
+				// The command too, not only the argument builder. Setting one
+				// without the other ran the default binary with another
+				// vendor's flags, and the ledger then named a backend that
+				// never executed.
+				commandName = b.Command()
 				argsBuilder = b.BuildArgs
 			}
 		}

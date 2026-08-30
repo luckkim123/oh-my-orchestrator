@@ -34,6 +34,12 @@ type Usage struct {
 	TotalCostUSD  float64 `json:"-"`
 	CostReported  bool    `json:"-"`
 	ResolvedModel string  `json:"-"`
+
+	// TokensReported separates "the backend sent a usage object" from "the
+	// parser had to synthesise one to carry cost". Without it a claude result
+	// that reports cost but no usage would be written down as a call that
+	// consumed zero tokens.
+	TokensReported bool `json:"-"`
 }
 
 // CachedIn is the input tokens a cache served, under whichever name the backend

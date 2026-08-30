@@ -229,7 +229,14 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 				notifyComplete()
 
 			case "turn.completed":
-				usage = event.Usage
+				// Assign only when present. codex emits one turn.completed per
+				// turn, but a second one without usage would otherwise erase
+				// the numbers the first reported.
+				if event.Usage != nil {
+					u := *event.Usage
+					u.TokensReported = true
+					usage = &u
+				}
 				infoFn("turn.completed event")
 				notifyComplete()
 
@@ -278,10 +285,16 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 			}
 
 			if event.Type == "result" {
-				if event.Usage != nil {
-					// Copy, then graft on the two facts that sit beside the
-					// `usage` object rather than inside it.
-					u := *event.Usage
+				// `total_cost_usd` and `modelUsage` sit beside `usage`, not
+				// inside it, so they must not be gated on it: a result that
+				// prices the turn but omits token counts still has to record
+				// what it cost.
+				if event.Usage != nil || event.TotalCostUSD != nil || len(event.ModelUsage) > 0 {
+					var u Usage
+					if event.Usage != nil {
+						u = *event.Usage
+						u.TokensReported = true
+					}
 					if event.TotalCostUSD != nil {
 						u.TotalCostUSD, u.CostReported = *event.TotalCostUSD, true
 					}
@@ -370,7 +383,10 @@ func dominantModelKey(m map[string]json.RawMessage) string {
 			OutputTokens int     `json:"outputTokens"`
 		}
 		if err := json.Unmarshal(raw, &v); err != nil {
-			continue
+			// Skipping the unreadable entry would hand the win to whatever
+			// else is in the map -- typically the cheap helper model. The
+			// dominant model is unknown here, and unknown is the answer.
+			return ""
 		}
 		c := candidate{k, v.CostUSD, v.InputTokens + v.OutputTokens}
 

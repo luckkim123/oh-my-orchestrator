@@ -25,7 +25,12 @@ var writeMu sync.Mutex
 type Tokens struct {
 	In       int `json:"in"`
 	CachedIn int `json:"cached_in"`
-	Out      int `json:"out"`
+	// Input written into a cache rather than served from one. claude bills it
+	// as fresh input and it dwarfs `in` on a cold call, so leaving it out
+	// understated the call and made `in` mean different things per backend.
+	// Omitted when zero: only claude reports it.
+	CacheWrite int `json:"cached_write,omitempty"`
+	Out        int `json:"out"`
 }
 
 // Call captures the metadata for one vendor invocation.
@@ -95,13 +100,33 @@ func Record(call Call) {
 	//
 	// An explicit CODEAGENT_LEDGER still writes, so the ledger's own tests
 	// exercise the real path by pointing it at a temp file.
-	if testing.Testing() && os.Getenv("CODEAGENT_LEDGER") == "" {
-		return
-	}
-
 	path, err := ledgerPath()
 	if err != nil {
 		logger.LogWarn("ledger: resolve path: " + err.Error())
+		return
+	}
+
+	// A test run is not vendor usage. Every test that drives the executor
+	// reaches this function, and measured once on this machine a single
+	// `go test ./...` left 65 rows in the real ledger against 5 genuine calls
+	// -- backends named `cat`, `sleep`, and temp-directory shell scripts.
+	//
+	// The comparison is against the resolved *default* path rather than
+	// against an unset CODEAGENT_LEDGER: someone who exports that variable to
+	// their real ledger would otherwise have every `go test` write to it.
+	// Tests that point it at a temp file still exercise the real write path.
+	if testing.Testing() {
+		if def, derr := defaultLedgerPath(); derr != nil || path == def {
+			return
+		}
+	}
+
+	// An existing path that is not a regular file is not a ledger. Measured:
+	// a FIFO here blocks the open forever, and because the mutex is held the
+	// whole process stops with it -- a best-effort write turning into a hang
+	// in every parallel task. Refusing is the only way to keep the contract.
+	if info, statErr := os.Lstat(path); statErr == nil && !info.Mode().IsRegular() {
+		logger.LogWarn("ledger: refusing to write to a non-regular file: " + path)
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -124,8 +149,22 @@ func Record(call Call) {
 		return
 	}
 
-	if _, err := f.Write(line); err != nil {
-		logger.LogWarn("ledger: append record: " + err.Error())
+	// A short write leaves a fragment that the next append lands behind,
+	// corrupting this row and the one after it. Finish the line if we can, and
+	// close it with a newline if we cannot, so the damage stops at one row.
+	written := 0
+	for written < len(line) {
+		n, werr := f.Write(line[written:])
+		written += n
+		if werr != nil || n == 0 {
+			if werr != nil {
+				logger.LogWarn("ledger: append record: " + werr.Error())
+			}
+			if written > 0 && line[written-1] != '\n' {
+				_, _ = f.Write([]byte{'\n'})
+			}
+			break
+		}
 	}
 	if err := f.Close(); err != nil {
 		logger.LogWarn("ledger: close file: " + err.Error())
@@ -137,7 +176,10 @@ func ledgerPath() (string, error) {
 	if path := os.Getenv("CODEAGENT_LEDGER"); path != "" {
 		return path, nil
 	}
+	return defaultLedgerPath()
+}
 
+func defaultLedgerPath() (string, error) {
 	stateHome := os.Getenv("XDG_STATE_HOME")
 	if stateHome == "" {
 		home := os.Getenv("HOME")
