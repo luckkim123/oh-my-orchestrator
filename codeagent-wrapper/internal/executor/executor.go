@@ -996,11 +996,16 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		cfg.Backend = taskSpec.Backend
 		if selectBackendFn != nil {
 			if b, err := selectBackendFn(taskSpec.Backend); err == nil {
-				// The command too, not only the argument builder. Setting one
+				// The command too, not only the argument builder: setting one
 				// without the other ran the default binary with another
-				// vendor's flags, and the ledger then named a backend that
-				// never executed.
-				commandName = b.Command()
+				// vendor's flags while the ledger named the backend that never
+				// executed. Only when the caller left the command at the
+				// default, though -- an explicit defaultCommandName is the
+				// seam tests inject a fake binary through, and clobbering it
+				// sends them at the real vendor.
+				if commandName == defaultBackendName {
+					commandName = b.Command()
+				}
 				argsBuilder = b.BuildArgs
 			}
 		}
