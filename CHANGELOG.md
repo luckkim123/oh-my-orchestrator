@@ -22,6 +22,25 @@ none?") had no denominator.
   a delegation made without the obligation met.
 - `TestGroundFlag` pins the six cases through `BuildSingleConfig`; the
   out-of-range and prose cases fail when the validation is widened, checked.
+- **`skills/harness/hooks/release-family-gate.py`** — the 2-family gate finally
+  has a layer that is not prose. `SKILL.md:65` has said "one family is the
+  default; two families in parallel is a gate … open it when the change is about
+  to ship in a release" since 0.19.0, and the 2026-08-31 evaluation found the
+  gate silenced by a session writing "one family is enough for this bundle" into
+  its own plan document — after which the commit, the tag, and the push all
+  passed with nothing objecting anywhere. This is a `PreToolUse` hook on `Bash`:
+  it intercepts a `git tag` naming a release-shaped tag and, when the ledger
+  shows fewer than two distinct `backend` values in the last 6h
+  (`OMO_FAMILY_GATE_HOURS`), returns `permissionDecision: "ask"`. It **asks, it
+  does not block** — D1, user, 2026-08-31: the cost of a second family is the
+  user's to weigh at the moment it would be spent, so the prompt names which
+  backends actually ran. Fail-open on a missing instrument (no ledger on a CI
+  runner, an unreadable one, an untokenizable command, any exception); a
+  malformed ledger *row* is deliberately the exception — skipped, so the rows
+  after it still count, because one junk byte appended to an unrotated log would
+  otherwise disable the gate forever.
+- `TestReleaseFamilyGate`, 13 cases / 16 subtests, discriminating in both
+  directions: a gate that never asks fails 3, a gate that always asks fails 3.
 
 ### Changed
 
@@ -58,6 +77,22 @@ none?") had no denominator.
   row with no `ground` in it — `internal/executor/executor.go:979` rebuilds
   `cfg` from `taskSpec` and drops anything the spec does not carry. Verified
   end-to-end against a real codex call, not by unit test alone.
+- **The gate's own release was the first thing the gate caught.** Fired against
+  the live ledger it reported `codex (5 calls)` and no second family, so the
+  change went out to codex *and* agy before the tag. It came back with eleven
+  reproducible defects and almost no overlap between the two — which is the
+  argument for the gate, made by the gate, on itself. The first version ran
+  three regexes over the raw command string, and that single decision was the
+  root of six of them: `git -C <dir> tag` never matched (silent on a real
+  release), `git tag -d v0.9.0 && git tag -a v1.2.3` was suppressed by the
+  delete half, a `-m "… git tag -d …"` message suppressed it the same way,
+  `git tag wip -m "prepare for v1.2.3"` fired on a scratch tag, and `-fd` /
+  `-n3` were unrecognised clusters. The command is now tokenized with `shlex`,
+  which is what makes quoting visible at all. codex found the other five in a
+  different register entirely: a row stamped 2099 stayed "recent" forever,
+  `CODEAGENT_LEDGER` was `expanduser`'d where Go takes it verbatim, the whole
+  unrotated ledger was read inside a 5s hook timeout, and both a `\`-newline
+  continuation and a real tag on the line after `git tag -l` went silent.
 
 ## [0.21.5] - 2026-08-31 — the roster counted another computer's backup
 
