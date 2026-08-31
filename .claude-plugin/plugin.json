@@ -1,6 +1,6 @@
 {
   "name": "oh-my-orchestrator",
-  "version": "0.21.0",
+  "version": "0.21.1",
   "description": "Multi-vendor orchestration harness. The Claude session executes; vendor CLIs advise by role on a tracked .hq/community/ board with enforcement on SubagentStop.",
   "author": {
     "name": "kimseungmin"

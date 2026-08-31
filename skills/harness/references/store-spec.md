@@ -141,6 +141,36 @@ Union merge is what makes concurrent machines safe. It also means **absence of a
 not evidence of non-migration** — it is equally consistent with "that machine has not
 pushed yet". Nothing may automate a quorum judgment off this file; see §7.
 
+**The row is written by `migrate-om-store.sh apply`** (claudebase, 2026-08-31), once per
+store that lands with `fail=0 conflict=0`, appended and never deduped because `drift`
+takes `max(at)` over a kind's rows and a second migration must advance that cut line.
+It was hand-written before that: nothing anywhere appended a row, so `drift` on a store
+migrated minutes earlier answered *"this store was never cut over"* (exit 6) on the very
+machine that had just migrated it — the §7 stage-1 sentence below described a step no
+code performed. `machine` is a human-stable **label**, not `hostname`: this Mac's
+hostname is `gwe52` and its roster name (§10) is `ksm-mac`, so the tool reads
+`HQ_MACHINE` and falls back to `hostname -s`. Set it per machine, or the roster and the
+ledger will name the same box twice.
+
+**The same rule generalizes: every append-only log that lands in a *tracked* layer needs
+`merge=union`.** The ledger is not the only one — `omp`'s secretary appends
+`config/project/secretary/ledger.jsonl` (hook-owned, machine-only) and one journal file
+per day beside it, both under `config/`, both written independently by every machine and
+linked worktree. The vault union-merged the *legacy* `.omp/` paths after an add/add
+conflict on 2026-08-17 and the `.hq/` cutover did not carry the rule across, so the
+anchor root's `.gitattributes` is:
+
+```
+.hq/config/migrated.jsonl                   merge=union
+.hq/config/project/secretary/ledger.jsonl   merge=union
+.hq/config/project/secretary/journal/*.md   merge=union
+```
+
+`ledger.jsonl` is hook-owned session state and by §3's layer rules belongs in `runtime/`;
+it sits in `config/` because that is where `omp_paths.py` computes the secretary
+directory. Union merge contains the conflict — it does not make the placement right, and
+moving it is an `omp` change with its own migration.
+
 ---
 
 ## 3. The four layers
@@ -336,29 +366,40 @@ spec.
 
 ## 5. `.gitignore`
 
-Two lines, at every repo that hosts an anchor. The `**/` prefix is required — anchors
+Four lines, at every repo that hosts an anchor. The `**/` prefix is required — anchors
 nest, and a repo-root-relative rule misses the nested ones:
 
 ```
 **/.hq/work/
 **/.hq/runtime/
 **/.harness.lock/
+**/.hq/**/.hq-lock
 ```
 
 (The third line is new with the 2026-08-31 root-local lock move: the state lock
 now lives in the root itself, so a session that dies holding it leaves an empty
 lockdir that would otherwise sit in `git status` until the next acquire reaps it.)
 
-**The per-harness legacy ignore lines are removed, as of this round (§9.4).** `oms`
-dropped `.oms/`, `omd` dropped `.omd/`, `omha` dropped `.omha/redact-patterns.txt`, `omx`
-dropped `.omx/`; `omp` and `omo` never had one of their own to drop. What remains is not
-a per-harness line still pending its own fallback-removal release — every harness has
-had that release now — it is two *other* repos that each host anchors for multiple
-harnesses: `claudebase`'s own `.omp/*` + `!.omp/rules.json` and `**/.orchestration/
-.hq-lock`, and the vault's `.omp/work/` · `.omp/state/` · `.omha/` · `**/.orchestration/
-.hq-lock`. Those come after `--purge` (§7 stage 3), which has not run anywhere on this
-machine — removing an ignore line ahead of the purge would leak the about-to-be-deleted
-legacy directory into git as a tracked file the moment anything touches it.
+**The fourth line is not covered by the first two, and that is the whole reason it is
+here.** It is `hq`'s advisory write lock, classified `not moved | recreated on demand`
+in §9.3 — but `store.py` creates it inside `community_dir()`, a **tracked** layer, so
+`work/` + `runtime/` never see it. `claudebase` and the vault each carry the line
+already; this block is where a *new* anchor was supposed to inherit it and did not.
+Measured on `stonefish_ws`, 2026-08-31: an anchor seeded from the two-line version of
+this block put `.hq/community/.hq-lock` straight into `git status`. A file the spec
+itself calls machine-local is the last thing that should arrive as a tracked file.
+
+**The per-harness legacy ignore lines are gone (§9.4), and so are the legacy stores they
+guarded.** `oms` dropped `.oms/`, `omd` dropped `.omd/`, `omha` dropped
+`.omha/redact-patterns.txt`, `omx` dropped `.omx/`; `omp` and `omo` never had one of
+their own to drop. The two *other* repos that host anchors for several harnesses —
+`claudebase`'s `.omp/*` + `!.omp/rules.json` + `**/.orchestration/.hq-lock`, and the
+vault's `.omp/work/` · `.omp/state/` · `.omha/` · `**/.orchestration/.hq-lock` — dropped
+theirs with the stage-3 purge itself (`claudebase` `ed36266`, vault `e746ea3c`, both
+2026-08-28), which is the order the rule requires: removing an ignore line *ahead* of the
+purge leaks the about-to-be-deleted legacy directory into git the moment anything touches
+it. **On every other machine the legacy stores are still on disk and those lines stay**
+until that machine runs its own purge.
 
 ### The tracked/ignored boundary shift for three repos
 
@@ -437,7 +478,8 @@ silent-failure branch to reverse.
 Cutover per harness runs in three stages:
 
 1. **Write new, read both.** Writes always go to `.hq/`. Reads try `.hq/` and fall back
-   to the legacy store. A row is appended to `migrated.jsonl`.
+   to the legacy store. A row is appended to `migrated.jsonl` — by `apply` itself since
+   2026-08-31; see §2, where that sentence went four days describing nobody's job.
 2. **Fallback removal.** Reads stop consulting the legacy path.
 3. **Purge.** The legacy store is deleted.
 
@@ -450,6 +492,12 @@ stores (`.omp` + `.omx`, ...) is one unit: create `.hq/.anchor` only after *all*
 are copied and verified — a gated or failed store blocks the marker. The migration tool
 says so at the end of a plan/apply run that leaves a store unfinished on an unanchored
 root (claudebase `migrate-om-store.sh`, 2026-08-31).
+
+**The other thing an operator reads as "done" is a clean summary that filled
+`community/wiki/`.** That directory is a staging state with one exit (§9.3), so the same
+tool now names it: a run that moves any page there prints the page count, the word
+STAGING, and the `convert-wiki-form.py` command, on stderr beside the anchor warning
+above. `conflict=0 fail=0` describes the copy, never the migration.
 
 The tool is `claudebase` `runtime/bin/migrate-om-store.sh` (P5, 2026-08-28) — dry-run by
 default, `apply` copies and sha256-verifies without deleting, `reverse` merges new-store

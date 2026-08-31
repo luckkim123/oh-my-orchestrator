@@ -188,6 +188,36 @@ class ApplyTest(unittest.TestCase):
             wiki = tmp / ".hq" / "community" / "wiki"
             self.assertEqual(list(wiki.rglob("*.md")), [])
 
+    def _committed_one_page(self, t, extra=None):
+        tmp = self._one_page(t)
+        if extra:
+            (tmp / ".hq" / "community" / "wiki" / extra).write_text("", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=tmp, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-qm", "init"], cwd=tmp, check=True)
+        return tmp
+
+    def test_commit_takes_the_staging_directory_with_the_last_page(self):
+        """A `.gitkeep` is not a `.md`, so `migrate-om-store.sh` carried one
+        across and `community/wiki/` outlived every page in it — a retired form
+        still looking live in the tree."""
+        with tempfile.TemporaryDirectory() as t:
+            tmp = self._committed_one_page(t, extra=".gitkeep")
+            path = _write_plan(tmp, _fill(cwf.plan(tmp)))
+            self.assertEqual(cwf.apply(tmp, path, commit=True), 0)
+            self.assertFalse((tmp / ".hq" / "community" / "wiki").exists())
+
+    def test_an_unknown_leftover_keeps_the_directory_rather_than_deleting_it(self):
+        """The discrimination: only `.gitkeep` is removed. Anything else in
+        there is content nobody classified, and `rmdir` must refuse."""
+        with tempfile.TemporaryDirectory() as t:
+            tmp = self._committed_one_page(t, extra="somebody-elses.txt")
+            path = _write_plan(tmp, _fill(cwf.plan(tmp)))
+            self.assertEqual(cwf.apply(tmp, path, commit=True), 0)
+            wiki = tmp / ".hq" / "community" / "wiki"
+            self.assertTrue(wiki.is_dir())
+            self.assertTrue((wiki / "somebody-elses.txt").exists())
+
     def test_it_never_creates_a_wiki_directory(self):
         """r7's user decision is "Wiki 폴더 안만들게" — the tool reads that tree
         where it already exists and refuses when it does not, never mints one."""

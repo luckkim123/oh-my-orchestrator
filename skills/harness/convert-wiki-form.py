@@ -356,6 +356,32 @@ def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
         if a.returncode != 0:
             raise SystemExit(f"git add failed: {a.stderr.strip()}")
         print(f"git add: {len(created_paths)} post(s) + INDEX.md staged")
+        # The wiki form is retired, so the exit must take the DIRECTORY with it,
+        # not just its pages. `migrate-om-store.sh` copies whatever the store
+        # held, and an omp store's `wiki/.gitkeep` is not a `.md`, so it came
+        # across and kept `community/wiki/` alive after every page was gone —
+        # a live-looking staging directory is exactly what this conversion
+        # exists to remove (measured on stonefish_ws, 2026-08-31, deleted by
+        # hand). Only `.gitkeep` is removed: anything else left in there is
+        # unknown content, and `rmdir` refusing on it is the right outcome.
+        if wiki.is_dir() and not any(wiki.rglob("*.md")):
+            keep = wiki / ".gitkeep"
+            if keep.exists():
+                subprocess.run(["git", "rm", "-q", "--ignore-unmatch", "--", str(keep)],
+                               cwd=anchor, capture_output=True, text=True)
+                if keep.exists():
+                    keep.unlink()
+            for d in sorted((p for p in wiki.rglob("*") if p.is_dir()),
+                            key=lambda p: len(p.parts), reverse=True):
+                try:
+                    d.rmdir()
+                except OSError:
+                    pass
+            try:
+                wiki.rmdir()
+                print(f"rmdir: {wiki} — the staging directory is gone")
+            except OSError as e:
+                print(f"note: {wiki} kept ({e.strerror}) — something else is in it")
     else:
         print(f"\n{len(removed)} page(s) left in place — rerun with --commit to `git rm` them")
     return 0

@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.1] - 2026-08-31 — the staging state stops looking finished
+
+Reported by `ksm-MS-7E01` while migrating `stonefish_ws` (`.omp` + `.omx` under
+one anchor — the first project with that pair, so the combination had never
+actually run). Five findings, all one shape: **the procedure is in store-spec
+and nothing in code binds it**, so the tool's exit signal never reaches the
+next step and the operator reads a clean summary as done.
+
+### Changed
+- `convert-wiki-form.py apply --commit` now removes the staging directory, not
+  only its pages. `migrate-om-store.sh` copies an omp store's `wiki/.gitkeep`
+  (not a `.md`, so the converter never touched it) and `community/wiki/`
+  outlived every page in it — a retired form still looking live. Only
+  `.gitkeep` is removed; any other leftover keeps the directory and says so.
+- `store-spec.md` §2 — the `migrated.jsonl` row is written by
+  `migrate-om-store.sh apply` (claudebase, same date). Stage 1 said "a row is
+  appended" and **no code anywhere appended one**, so `drift` answered "this
+  store was never cut over" (exit 6) on the machine that had just migrated it.
+  Also: `machine` is a human-stable label, not `hostname` (`ksm-mac` vs
+  `gwe52`), set by `HQ_MACHINE`.
+- `store-spec.md` §2 — the union-merge rule generalized to every append-only
+  log in a *tracked* layer, naming omp's `secretary/ledger.jsonl` and
+  `secretary/journal/*.md`. The vault union-merged the legacy `.omp/` paths in
+  2026-08 and the `.hq/` cutover did not carry the rule across; 465 ledger
+  lines and 37 journal files sat tracked with no merge driver.
+- `store-spec.md` §5 — a **fourth** ignore line, `**/.hq/**/.hq-lock`.
+  `hq`'s advisory write lock is classified *not moved, recreated on demand*
+  yet `store.py` creates it inside `community_dir()`, a tracked layer, so the
+  `work/` + `runtime/` pair never covered it. A new anchor seeded from the
+  two-line block put the lock straight into `git status`.
+- `store-spec.md` §5 — the "purge has not run anywhere on this machine"
+  paragraph contradicted this file's own banner: stage 3 ran on `ksm-mac`
+  2026-08-28 and the legacy ignore lines went with it.
+- `store-spec.md` §7 — the wiki staging notice the migration tool now prints.
+
+### Verification
+287 tests pass (2 new: the directory removal, and its discrimination — an
+unknown leftover must keep the directory). Both new tests fail against 0.21.0.
+
 ## [0.21.0] - 2026-08-31 — the npx installer is gone, and the lock lives where the state lives
 
 The legacy `npx github:stellarlinkco/myclaude` install path shipped its last
