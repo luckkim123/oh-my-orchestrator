@@ -6,6 +6,7 @@ and edge cases for all 4 hooks: Stop, SessionStart, TeammateIdle, SubagentStop.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import re
@@ -23,6 +24,7 @@ SUBAGENT_HOOK = HOOKS_DIR / "harness-subagentstop.py"
 SUBAGENT_START_HOOK = HOOKS_DIR / "harness-subagentstart.py"
 PRECOMPACT_HOOK = HOOKS_DIR / "harness-precompact.py"
 CLAIM_HOOK = HOOKS_DIR / "harness-claim.py"
+GATE_HOOK = HOOKS_DIR / "release-family-gate.py"
 
 # Read out of the hook rather than restated here: the boundary test pins the
 # comparison, not the number. Retuning the window is a deliberate edit and must
@@ -1686,6 +1688,168 @@ class TestClaimHook(unittest.TestCase):
         activate(self.root)
         code, _, _ = run_hook(IDLE_HOOK, {"cwd": self.tmpdir})
         self.assertEqual(code, 0)
+
+
+class TestReleaseFamilyGate(unittest.TestCase):
+    """PreToolUse gate: a release tag with one vendor family asks, never blocks.
+
+    Every case pins `CODEAGENT_LEDGER` at a fixture so the developer's real
+    ledger cannot decide a test's outcome.
+    """
+
+    TAG_CMD = 'git tag -a v0.21.6 -m "release"'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ledger = Path(self.tmp.name) / "calls.jsonl"
+        self.addCleanup(self.tmp.cleanup)
+
+    def write_ledger(self, *rows: dict, ago_hours: float = 0.5) -> None:
+        ts = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=ago_hours)
+        stamp = ts.astimezone().isoformat()
+        self.ledger.write_text(
+            "\n".join(json.dumps({"ts": stamp, "workdir": "/tmp/fixture", **r}) for r in rows)
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def run_gate(self, command: str | None = None, **env):
+        payload = {"tool_name": "Bash", "tool_input": {"command": command or self.TAG_CMD}}
+        return run_hook(GATE_HOOK, payload, {"CODEAGENT_LEDGER": str(self.ledger), **env})
+
+    def test_one_family_asks_and_names_the_backend(self):
+        self.write_ledger({"backend": "codex"}, {"backend": "codex"})
+        code, stdout, _ = self.run_gate()
+        self.assertEqual(code, 0)
+        out = json.loads(stdout)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "ask")
+        # D1: "gate not satisfied" alone is not enough -- the user decides cost
+        # here, so the fact that only codex ran has to be in the prompt.
+        self.assertIn("codex", out["permissionDecisionReason"])
+        self.assertIn("2 calls", out["permissionDecisionReason"])
+
+    def test_two_families_pass_silently(self):
+        self.write_ledger({"backend": "codex"}, {"backend": "agy"})
+        code, stdout, _ = self.run_gate()
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+
+    def test_missing_ledger_skips_rather_than_fails(self):
+        """A GitHub runner has no ledger; the gate must not turn that into a stop."""
+        code, stdout, _ = self.run_gate()  # never written
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+
+    def test_calls_outside_the_window_do_not_count(self):
+        self.write_ledger({"backend": "codex"}, {"backend": "agy"}, ago_hours=48)
+        code, stdout, _ = self.run_gate()
+        self.assertEqual(code, 0)
+        self.assertIn("no vendor calls at all", json.loads(stdout)["hookSpecificOutput"][
+            "permissionDecisionReason"])
+
+    def test_window_is_configurable(self):
+        self.write_ledger({"backend": "codex"}, {"backend": "agy"}, ago_hours=10)
+        self.assertNotEqual(self.run_gate()[1], "")            # outside default 6h
+        self.assertEqual(self.run_gate(OMO_FAMILY_GATE_HOURS="24")[1], "")
+
+    def test_a_malformed_row_does_not_blind_the_rows_after_it(self):
+        """The bad line goes FIRST and the second family AFTER it, so a parser
+        that aborts on corruption sees only codex and asks -- appending the bad
+        line last would pass even on a parser that gives up immediately."""
+        self.write_ledger({"backend": "codex"}, {"backend": "agy"})
+        rows = self.ledger.read_text(encoding="utf-8").splitlines()
+        self.ledger.write_text("{not json\n" + "\n".join(rows) + "\n", encoding="utf-8")
+        code, stdout, _ = self.run_gate()
+        self.assertEqual((code, stdout), (0, ""))
+
+    def test_future_timestamps_do_not_count_as_recent(self):
+        """Without an upper bound two junk rows dated 2099 satisfy the gate
+        forever, because they are never older than the cutoff (codex)."""
+        self.write_ledger({"backend": "codex"}, {"backend": "agy"}, ago_hours=-24 * 365 * 70)
+        out = json.loads(self.run_gate()[1])["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "ask")
+
+    def test_ledger_override_is_taken_verbatim_like_go(self):
+        """Go returns CODEAGENT_LEDGER unexpanded, so `~/x.jsonl` names a
+        literal `~` directory. A hook that expanded it would read a file the
+        wrapper never wrote to (codex)."""
+        home = Path(self.tmp.name) / "home"
+        home.mkdir()
+        decoy = home / "decoy.jsonl"
+        decoy.write_text(json.dumps({"ts": _dt.datetime.now().astimezone().isoformat(),
+                                     "backend": "codex"}) + "\n", encoding="utf-8")
+        code, stdout, _ = run_hook(
+            GATE_HOOK,
+            {"tool_name": "Bash", "tool_input": {"command": self.TAG_CMD}},
+            {"CODEAGENT_LEDGER": "~/decoy.jsonl", "HOME": str(home)},
+        )
+        self.assertEqual((code, stdout), (0, ""))
+
+    def test_only_the_tail_of_a_large_ledger_is_read(self):
+        """The recent rows sit at the end and the byte cut lands mid-line, so a
+        tail read must drop the partial line without losing what follows."""
+        filler = json.dumps({"ts": "2020-01-01T00:00:00+09:00", "backend": "codex",
+                             "workdir": "/tmp/old"})
+        self.write_ledger({"backend": "codex"}, {"backend": "agy"})
+        recent = self.ledger.read_text(encoding="utf-8")
+        self.ledger.write_text(
+            (filler + "\n") * (2_100_000 // (len(filler) + 1)) + recent, encoding="utf-8")
+        self.assertGreater(self.ledger.stat().st_size, 2_000_000)
+        self.assertEqual(self.run_gate()[1], "")
+
+    def test_unreadable_ledger_fails_open(self):
+        self.write_ledger({"backend": "codex"})
+        self.ledger.chmod(0o000)
+        self.addCleanup(self.ledger.chmod, 0o600)
+        if os.access(self.ledger, os.R_OK):      # root ignores the mode bits
+            self.skipTest("cannot make a file unreadable as this user")
+        self.assertEqual(self.run_gate()[1], "")
+
+    def test_non_release_commands_are_ignored(self):
+        """Only a command that actually ships a release is the gate's business.
+
+        Every case below is a false positive the first (regex-over-the-raw-
+        string) version produced; agy named them 2026-08-31.
+        """
+        self.write_ledger({"backend": "codex"})
+        for cmd in (
+            "git status --short",
+            "git tag wip-refactor",                       # not release-shaped
+            'git tag wip -m "prepare for v0.21.6"',       # version only in the message
+            "git tag -l 'v0.21.*'",                       # listing
+            "git tag -d v0.21.5",                         # deleting
+            "git tag -fd v0.21.5",                        # delete in a short cluster
+            "git tag -n3 v0.21.5",                        # -n<num>, list with message
+            "git tag --sort=-version:refname -l v0.21.5",  # listing, flag before -l
+            "grep -rn 'v0.21.6' CHANGELOG.md",            # no git tag at all
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(self.run_gate(cmd)[1], "")
+
+    def test_release_commands_the_regex_version_missed(self):
+        """Each of these ships a release and must reach the gate."""
+        self.write_ledger({"backend": "codex"})
+        for cmd in (
+            'git -C /Users/x/repo tag -a v0.21.6 -m "release"',   # global -C
+            'git tag -d v0.21.5 && git tag -a v0.21.6 -m "x"',    # delete then ship
+            'git tag -a v0.21.6 -m "notes: git tag -d v0.21.5"',  # flag inside a message
+            'git tag -a v0.21.6-rc1 -m "candidate"',              # an rc ships too
+            'cd /tmp/repo && git tag -a v0.21.6 -m "x" && git push --tags',
+            'git \\\n  tag -a v0.21.6 -m "x"',                    # line continuation
+            "git tag -l 'v0.21.*'\ngit tag -a v0.21.6 -m 'x'",    # listing, then a real tag
+        ):
+            with self.subTest(cmd=cmd):
+                out = json.loads(self.run_gate(cmd)[1])["hookSpecificOutput"]
+                self.assertEqual(out["permissionDecision"], "ask")
+
+    def test_only_bash_is_inspected(self):
+        self.write_ledger({"backend": "codex"})
+        code, stdout, _ = run_hook(
+            GATE_HOOK,
+            {"tool_name": "Edit", "tool_input": {"command": self.TAG_CMD}},
+            {"CODEAGENT_LEDGER": str(self.ledger)},
+        )
+        self.assertEqual((code, stdout), (0, ""))
 
 
 if __name__ == "__main__":
