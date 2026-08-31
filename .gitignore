@@ -19,3 +19,19 @@ output/
 # (store-spec §3, §5). The `**/` prefix is required because anchors nest.
 **/.hq/work/
 **/.hq/runtime/
+
+# --- Code-graph indexes ---
+# Build artifacts: megabytes, regenerated from source, and stale the moment
+# someone else commits. The IGNORE files that configure them (.graphifyignore)
+# are configuration and stay tracked.
+#
+# 2026-08-31: 136 AST-cache entries (4.1 MB) were tracked here, keyed by a
+# graphify version directory (`cache/ast/v0.9.48-s2/`), so every graphify
+# upgrade rewrote the whole set on one machine and conflicted on the next.
+# The AST pass is tree-sitter -- free and seconds -- so there is nothing to
+# share. Only a *paid* semantic cache is worth tracking, and this repo has
+# none; if one is ever built here, un-ignore it the way the obsidian vault
+# does (`.graphify/*` + `!.graphify/cache/`, never `.graphify/` + a negation --
+# git cannot revive a child of an excluded directory).
+.graphify/
+graphify-out/
