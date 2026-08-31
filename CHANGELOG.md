@@ -2,6 +2,161 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.0] - 2026-08-31 — every reader now counts failures the way the Stop hook does
+
+An audit against PLAN Phase 2-B found its claim — "the unlimited-retry hole is
+closed" — true for exactly one of four readers. `harness-stop.py` judged
+retryability on `max(attempts, logged ERROR lines)`; `harness-claim.py`,
+`harness-teammateidle.py` and `harness-sessionstart.py` still read the raw
+`attempts` self-report, so a session that never bumped the field could claim a
+task the Stop hook had already ruled out. Same data, two read rules — the
+defect class this repo has now recorded four times. The fix is not another
+copy of the rule but the removal of the copies: the eligibility logic now
+lives once in `_harness_common.py` and every hook consumes it.
+
+### Changed
+- **`_harness_common.eligible_tasks(tasks, logged)`** — retryability is judged
+  on `effective_attempts` (max of the `attempts` field and the per-task ERROR
+  count from `harness-progress.txt`). `logged_failures` /
+  `progress_logged_failures` / `effective_attempts` moved up from
+  `harness-stop.py`; claim, teammateidle and sessionstart all pass the
+  log-derived count now — the cross-family review caught that a
+  display-only sessionstart would advertise `next=t1` for a task every
+  enforcing hook already considered exhausted.
+- **Hook dedup, −546 net lines** — claim (286→84), renew (199→83),
+  teammateidle (162→89), sessionstart (185→87), stop (474→345) shed their
+  private copies of payload reading, root discovery, JSON I/O, lock
+  primitives, priority sort and lease reaping in favor of `hc.*`. The
+  fail-open contract is unchanged: `hc is None` still means every hook is a
+  no-op, and the corrupt-gate path still fails loud.
+- **`lockdir_for_root` uses `tempfile.gettempdir()`** instead of a hardcoded
+  `/tmp` (PLAN Global Constraints; 3-OS distribution). Measured on macOS: the
+  lock lands under the real `$TMPDIR` (`/var/folders/...`). Windows remains
+  unmeasured. Transitional note: a process on the old build locks
+  `/tmp/harness-<hash>.lock` while a new one locks the tempdir path — no
+  active campaign exists, so no live lock crosses the upgrade. Residual
+  (review finding, recorded): two same-version processes with different
+  `TMPDIR` environments (GUI vs env-stripped launch) still derive different
+  lock directories for one board; a root-local lockdir would close it and is
+  backlogged rather than stacked onto this move.
+- **`SKILL.md` concurrency snippet agrees with the hooks** — the bash lock
+  ascends to the root carrying any of the three state markers
+  (`.hq/runtime/board.json`, `.orchestration/board.json`,
+  `harness-tasks.json`) instead of only the legacy file, honors
+  `HARNESS_STATE_ROOT` the way `find_harness_root` does (marker-checked,
+  resolved), hashes the physical path (`pwd -P` — the hooks hash the
+  resolved path, so a symlinked cwd used to hash a different key), and uses
+  `${TMPDIR:-/tmp}`. Measured: bash ROOT equals the hook's root in the
+  subdirectory, symlinked-cwd, env-root, and markerless-env cases.
+- **`hq --version` reports the plugin manifest version** (walks up to
+  `.claude-plugin/plugin.json`), retiring the fourth version lineage
+  (`hq.__version__ = "0.1.0"`, deleted). Presence-not-currency needs a
+  comparable number, and `0.1.0` compared to nothing.
+
+### Added
+- **`hq post --date YYYY-MM-DD`** — the frontmatter date, defaulting to
+  today. Every store migration so far (finding/098) has had to `sed` dates
+  after the fact because `post` hardwired `_now_date()`; the ISO shape check
+  in `verbs.post_new` still rejects anything else.
+- **7 tests** (280 → 287): claim refuses a task whose logged failures exhaust
+  `max_attempts` (the reproduction fixture), claim still hands out pending
+  and under-limit tasks, teammateidle and sessionstart agree with the Stop
+  hook on logged failures, and `--date` lands in frontmatter / bad dates
+  still die.
+
+### Fixed
+- **Delegation-ground renumbering, the 7 sites 0.15.0 missed.** Its Notes
+  claimed "every cross-reference moved with it"; the sweep covered
+  `omo/SKILL.md` and stopped. `harness-stop.py:27,246`,
+  `harness/SKILL.md:397` (3-strike = ground 3, not 1),
+  `orchestrator/SKILL.md:24` (seven roles, four grounds), `:76` (adversarial
+  review = ground 4), `:87` (escape = ground 3), and the half-migrated
+  paragraph in `vendor-ops.md:165-177` now all use the 0.15.0 numbering.
+  `grep -rn "ground [0-9]" skills/` audits clean against the canonical table.
+- **Stale stage-2 declarations.** `hq/paths.py` and `_harness_common.py` both
+  still declared "P2 is behavior-unchanged — `.hq` is not yet the live root
+  anywhere", and `hq/__init__.py` "nothing here assumes `.hq/community/`
+  exists yet" — false since 0.8.0 flipped the anchor gate. The docstrings now
+  state the gate. `SKILL.md`'s migration guidance pointed at
+  `.orchestration/board.json` as the destination; the board seed's `_comment`
+  and `install_vendor_context.py`'s loader description likewise. All now name
+  the anchor-gated pair. Operational prose that said `harness-tasks.json`
+  where it meant "the state file" is generalized.
+- **`config.json`** security operation description read "Install develop
+  agent prompt" (copy-paste).
+- **`ledger.go`** carried the same test-run comment paragraph twice; one
+  survives.
+- **`README.md` described an installation that does not deliver the plugin.**
+  Install said `python3 install.py` (the npx-era route) and never mentioned
+  building the wrapper, the `$GOBIN` symlink, or `~/.codeagent/models.json` —
+  a stranger following it got a harness with no vendor lane. Status still said
+  "Phases 1–5 are in progress" with all of them complete. Both rewritten;
+  `install.sh`'s upstream-binary trap is now warned about where an installer
+  would look for it.
+
+### Removed
+- **The fork-remnant sweep the earlier releases deferred** (user-approved
+  2026-08-31; the npx-era installer set — `package.json`, `bin/cli.js`,
+  `install.py`, root `hooks/` — stays until a replacement seeder for
+  `~/.codeagent/models.json` exists, since `install.py` is today's only
+  automated one):
+  - `install.sh` no longer downloads the upstream `stellarlinkco/myclaude`
+    binary — a build with no `agy` backend that overwrote a local one while
+    every existence check passed. It now refuses with build-from-source
+    instructions.
+  - `skills/omo/.claude-plugin/plugin.json` — the nested fork manifest
+    (5.6.1, upstream author); zero readers, and the third version lineage
+    0.19.2's Notes left unresolved is closed with it.
+  - The `gemini` and `opencode` backends, fully: `gemini.go`, `opencode.go`,
+    their parser branches and event structs (`GeminiEvent`, `OpencodePart`,
+    five UnifiedEvent fields), the gemini stderr noise list, the
+    `~/.gemini/.env` loading path, the infrastructure aliases, and ~200 test
+    lines. `Select()` had rejected both since D24 — this is the "separate
+    sweep" that decision named. `templates/vendor/gemini/` and the
+    installer's gemini vendor entry go with it; docs that listed gemini as a
+    loader-capable backend now say codex/antigravity.
+- `_harness_common.py`: `emit_block` / `emit_allow` / `emit_context` /
+  `maybe_log_hook_event` — zero callers (grep-measured before deletion;
+  `emit_json` and `load_state` stay, they have callers).
+- `self-reflect-stop.py`: the hc-None "fallback" discovery block whose every
+  inner branch required `hc is not None` — unreachable by construction,
+  ~28 lines whose comment claimed a behavior the code could not perform.
+- `.code-review-graphignore` — config for a tool removed from every machine
+  on 2026-08-29; nothing reads it.
+
+### Distribution
+- `store-spec.md` §9 (the 23-anchor migration census) is now bannered
+  **non-normative — origin-machine migration record**: the paths and project
+  names in it are the origin operator's, not part of the spec, and nothing in
+  it binds a new deployment.
+
+### Verification
+- `python3.12 -m pytest skills/harness/tests/ tests/test_version_sync.py
+  hooks/test_pre_bash.py -q` → 287 passed.
+- Cross-family adversarial review (codex, ground 4) over the hook diff:
+  equivalence of the deleted copies confirmed; four findings adopted
+  (sessionstart display drift, two SKILL.md prose sites still selecting on
+  raw `attempts`, `HARNESS_STATE_ROOT` and symlink parity in the bash lock
+  snippet — all fixed above); two recorded as pre-existing backlog (legacy
+  unanchored corrupt board is read as inactive rather than loud, and the
+  `TMPDIR`-variance lock split noted in the Changed entry).
+- Mutation, not just green: reverting `eligible_tasks` to the raw `attempts`
+  count fails exactly three tests — the new claim test, the new teammateidle
+  test, and the Stop hook's own `test_logged_errors_exhaust_retries` — which
+  is also the proof all three hooks now run through the one shared path.
+- `go vet ./...` and `go test ./...` (18 packages) pass after the comment
+  dedup and the gemini/opencode deletion; the one parser test that pinned the
+  retired agy-before-gemini ordering was removed with the branch it guarded.
+- Live: `bin/hq --version` → `0.20.0` (manifest); claim under a custom
+  `TMPDIR` locks there and leaves nothing in `/tmp`.
+
+### Notes
+- `harness-subagentstop.py` keeps its four small local wrappers
+  (payload/root/json/active): it carries no eligibility logic, and the audit
+  item was scoped to the four files that did.
+- Windows lock-path behavior is asserted from `tempfile.gettempdir()`
+  semantics, not measured (audit plan B2 stands).
+
 ## [0.19.2] - 2026-08-31 — the guard the sibling repos already had
 
 0.19.1 fixed a manifest that was never bumped. This adds the check that would

@@ -106,11 +106,6 @@ func Record(call Call) {
 		return
 	}
 
-	// A test run is not vendor usage. Every test that drives the executor
-	// reaches this function, and measured once on this machine a single
-	// `go test ./...` left 65 rows in the real ledger against 5 genuine calls
-	// -- backends named `cat`, `sleep`, and temp-directory shell scripts.
-	//
 	// The comparison is against the resolved *default* path rather than
 	// against an unset CODEAGENT_LEDGER: someone who exports that variable to
 	// their real ledger would otherwise have every `go test` write to it.

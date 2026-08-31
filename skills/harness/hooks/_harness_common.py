@@ -8,9 +8,9 @@ Ported from Codex harness hooks to Claude Code.
 Also the hooks-side declaration point for the `.orchestration` root literal
 (LEGACY_ROOT below), a sibling to hq/paths.py rather than an import of it --
 see hq/paths.py's module docstring and test_paths_lint.py for why a hook does
-not reach across into the hq/ package for this. P2 (store-spec.md §9.5) is
-behavior-unchanged: every path helper below returns exactly what the inline
-code it replaced computed.
+not reach across into the hq/ package for this. Path resolution here is
+anchor-gated (store-spec.md §7 stage 2), mirroring hq/store.py: a parseable
+`.hq/.anchor` routes to `.hq/`, otherwise the legacy `.orchestration/` paths.
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -67,44 +68,6 @@ def read_hook_payload() -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
-
-
-def maybe_log_hook_event(root: Path, payload: dict[str, Any], hook_script: str) -> None:
-    """Optionally append a compact hook execution record to HARNESS_HOOK_LOG.
-
-    This is opt-in debugging: when HARNESS_HOOK_LOG is unset, it is a no-op.
-    Call this only after the .harness-active guard passes.
-    """
-    log_path = os.environ.get("HARNESS_HOOK_LOG")
-    if not log_path:
-        return
-
-    entry: dict[str, Any] = {
-        "ts": iso_z(utc_now()),
-        "hook_script": hook_script,
-        "hook_event_name": payload.get("hook_event_name"),
-        "harness_root": str(root),
-    }
-    for k in (
-        "session_id",
-        "cwd",
-        "source",
-        "reason",
-        "teammate_name",
-        "team_name",
-        "agent_id",
-        "agent_type",
-        "stop_hook_active",
-    ):
-        if k in payload:
-            entry[k] = payload.get(k)
-
-    try:
-        Path(log_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
-        with Path(log_path).expanduser().open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception:
-        return
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +357,7 @@ def tail_text(path: Path, max_bytes: int = 200_000) -> str:
 
 def lockdir_for_root(root: Path) -> Path:
     h = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:16]
-    return Path("/tmp") / f"harness-{h}.lock"
+    return Path(tempfile.gettempdir()) / f"harness-{h}.lock"
 
 
 def _pid_alive(pid: int) -> bool:
@@ -481,6 +444,38 @@ def task_max_attempts(t: dict[str, Any]) -> int:
         return 3
 
 
+def logged_failures(progress_tail: str) -> dict[str, int]:
+    """Count ERROR lines per task id in a harness-progress.txt tail.
+
+    `attempts` is written by whoever executed the task, so a session that
+    forgets to bump it silently earns unlimited retries. The progress log is
+    the file's own record of what happened; taking the larger of the two
+    (effective_attempts) makes the failure count a fact, not a self-report.
+    """
+    counts: dict[str, int] = {}
+    for line in progress_tail.splitlines():
+        if " ERROR [" not in line:
+            continue
+        _, _, rest = line.partition(" ERROR [")
+        tid, sep, _ = rest.partition("]")
+        if sep and tid:
+            counts[tid.strip()] = counts.get(tid.strip(), 0) + 1
+    return counts
+
+
+def progress_logged_failures(root: Path) -> dict[str, int]:
+    """logged_failures() over this root's progress log; {} when unreadable."""
+    p = root / "harness-progress.txt"
+    try:
+        return logged_failures(tail_text(p)) if p.is_file() else {}
+    except Exception:
+        return {}
+
+
+def effective_attempts(t: dict[str, Any], logged: dict[str, int]) -> int:
+    return max(task_attempts(t), logged.get(str(t.get("id") or ""), 0))
+
+
 def deps_completed(t: dict[str, Any], completed_ids: set[str]) -> bool:
     deps = t.get("depends_on") or []
     if not isinstance(deps, list):
@@ -506,9 +501,19 @@ def completed_ids(tasks: list[dict[str, Any]]) -> set[str]:
 
 def eligible_tasks(
     tasks: list[dict[str, Any]],
+    logged: Optional[dict[str, int]] = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return (pending_eligible, retryable) sorted by priority then id."""
+    """Return (pending_eligible, retryable) sorted by priority then id.
+
+    `logged` is the per-task ERROR-line count from the progress log (see
+    progress_logged_failures below). Every reader that decides whether a
+    failed task may run again must pass it: retryability is judged on
+    effective_attempts -- the same count the Stop hook enforces -- so a
+    session that never bumped `attempts` cannot earn extra retries from a
+    reader that only trusted the self-report.
+    """
     done = completed_ids(tasks)
+    logged = logged or {}
 
     pending = [
         t for t in tasks
@@ -517,7 +522,7 @@ def eligible_tasks(
     retry = [
         t for t in tasks
         if str(t.get("status", "")) == "failed"
-        and task_attempts(t) < task_max_attempts(t)
+        and effective_attempts(t, logged) < task_max_attempts(t)
         and deps_completed(t, done)
     ]
 
@@ -587,27 +592,6 @@ def is_concurrent(cfg: dict[str, Any]) -> bool:
 # ---------------------------------------------------------------------------
 # Hook output helpers
 # ---------------------------------------------------------------------------
-
-def emit_block(reason: str) -> None:
-    """Print a JSON block decision to stdout and exit 0."""
-    print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
-
-
-def emit_allow(reason: str = "") -> None:
-    """Print a JSON allow decision to stdout and exit 0."""
-    out: dict[str, Any] = {"decision": "allow"}
-    if reason:
-        out["reason"] = reason
-    print(json.dumps(out, ensure_ascii=False))
-
-
-def emit_context(context: str) -> None:
-    """Inject additional context via hookSpecificOutput."""
-    print(json.dumps(
-        {"hookSpecificOutput": {"additionalContext": context}},
-        ensure_ascii=False,
-    ))
-
 
 def emit_json(data: dict[str, Any]) -> None:
     """Print arbitrary JSON to stdout."""

@@ -73,8 +73,6 @@ type minimalClaudeSettings = backend.MinimalClaudeSettings
 
 func loadMinimalClaudeSettings() minimalClaudeSettings { return backend.LoadMinimalClaudeSettings() }
 
-func loadGeminiEnv() map[string]string { return backend.LoadGeminiEnv() }
-
 func NewLogger() (*Logger, error) { return ilogger.NewLogger() }
 
 func NewLoggerWithSuffix(suffix string) (*Logger, error) { return ilogger.NewLoggerWithSuffix(suffix) }
@@ -1052,16 +1050,6 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		}
 	}
 
-	// Load gemini env from ~/.gemini/.env if exists
-	if cfg.Backend == "gemini" {
-		fileEnv = loadGeminiEnv()
-		if cfg.Mode != "resume" && strings.TrimSpace(cfg.Model) == "" {
-			if model := fileEnv["GEMINI_MODEL"]; model != "" {
-				cfg.Model = model
-			}
-		}
-	}
-
 	useStdin := taskSpec.UseStdin
 	// agy has no stdin path: `--print` takes the prompt as a flag value and
 	// errors "flag needs an argument" without one, while `--print -` sends the
@@ -1224,7 +1212,7 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		cmd.UnsetEnv("CLAUDECODE")
 	}
 
-	// For backends that don't support -C flag (claude, gemini), set working directory via cmd.Dir
+	// For backends that don't support -C flag (claude, agy), set working directory via cmd.Dir
 	// Codex passes workdir via -C flag, so we skip setting Dir for it to avoid conflicts
 	if cfg.Mode != "resume" && commandName != "codex" && cfg.WorkDir != "" {
 		cmd.SetDir(cfg.WorkDir)
@@ -1235,14 +1223,11 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		stderrWriters = append(stderrWriters, stderrLogger)
 	}
 
-	// For gemini backend, filter noisy stderr output
+	// For codex backend, filter noisy stderr output
 	var stderrFilter *filteringWriter
 	if !silent {
 		stderrOut := io.Writer(os.Stderr)
-		if cfg.Backend == "gemini" {
-			stderrFilter = newFilteringWriter(os.Stderr, geminiNoisePatterns)
-			stderrOut = stderrFilter
-		} else if cfg.Backend == "codex" {
+		if cfg.Backend == "codex" {
 			stderrFilter = newFilteringWriter(os.Stderr, codexNoisePatterns)
 			stderrOut = stderrFilter
 		}

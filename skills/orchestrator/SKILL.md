@@ -21,7 +21,7 @@ holds them to it.
 
 | Piece | Where | What it gives you |
 |:---|:---|:---|
-| Vendor consultation | `omo` skill | The six roles, the three delegation grounds, the Context Pack |
+| Vendor consultation | `omo` skill | The seven roles, the four delegation grounds, the Context Pack |
 | Board and enforcement | `harness` skill | `.hq/runtime/board.json`, the activation gate, `SubagentStop` |
 | Campaign protocol | `harness`, `references/campaign-protocol.md` | Launch proposal, posts, worker briefs, termination |
 | Lane boundary | `omo`, `references/lane-boundary.md` | What a vendor may be handed once a domain lane is running |
@@ -73,7 +73,7 @@ The board earns its cost when workers have to see each other's conclusions.
 - **It does not make a vendor's answer true.** What comes back is advice. Verify it
   against the repo before acting, and never report it as a result.
 - **It does not approve its own work.** The authoring pass and the reviewing pass are
-  different passes, and under delegation ground 3 a different model.
+  different passes, and under delegation ground 4 a different model.
 
 ## Before you propose
 
@@ -84,6 +84,6 @@ this rig; the literature's saturation point of roughly four is someone else's
 measurement. Count the axes and use that number.
 
 **A roster that cannot escape.** If every worker runs the same model family, delegation
-ground 1 has nowhere to go the first time something fails twice. Check what each
+ground 3 has nowhere to go the first time something fails twice. Check what each
 backend actually resolves to — `agy` serves Claude models too, so "different vendor"
 and "different prior" are not the same claim.

@@ -7,11 +7,9 @@ Exit code 0 allows the teammate to go idle.
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Optional
 
 # Board resolution and the activation gate live in one place; a hook that carried
 # its own copy would drift the moment the gate changed. Missing helper module =>
@@ -24,51 +22,9 @@ except ImportError:
 
 
 
-def _read_hook_payload() -> dict[str, Any]:
-    raw = sys.stdin.read()
-    if not raw.strip():
-        return {}
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
-    """Locate the root holding .hq/runtime/board.json, .orchestration/board.json,
-    or harness-tasks.json."""
-    if hc is None:
-        return None
-    return hc.find_harness_root(payload)
-
-
-def _load_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path.name} must be a JSON object")
-    return data
-
-
-def _priority_rank(v: Any) -> int:
-    return {"P0": 0, "P1": 1, "P2": 2}.get(str(v or ""), 9)
-
-
-def _is_harness_active(root: Path) -> bool:
-    """True when hooks are live: board.json.status == "active".
-
-    A closed campaign keeps its board on disk, so presence cannot mean active.
-    Roots that have not migrated still gate on the .harness-active marker.
-    """
-    if hc is None:
-        return False
-    return hc.is_harness_active(root)
-
-
 def main() -> int:
-    payload = _read_hook_payload()
-    root = _find_harness_root(payload)
+    payload = hc.read_hook_payload() if hc else {}
+    root = hc.find_harness_root(payload) if hc else None
     if root is None:
         return 0  # no harness project, allow idle
 
@@ -81,51 +37,20 @@ def main() -> int:
         return 2
 
     # Guard: only active when harness skill is triggered
-    if not _is_harness_active(root):
+    if not hc.is_harness_active(root):
         return 0
 
-    tasks_path = hc.state_path(root) if hc else (root / "harness-tasks.json")
+    tasks_path = hc.state_path(root)
     try:
-        state = _load_json(tasks_path)
-        tasks_raw = state.get("tasks") or []
-        if not isinstance(tasks_raw, list):
-            return 0
-        tasks = [t for t in tasks_raw if isinstance(t, dict)]
+        state = hc.load_json(tasks_path)
+        tasks = hc.parse_tasks(state)
     except Exception:
         return 0  # can't read state, allow idle
 
-    completed = {str(t.get("id", "")) for t in tasks if str(t.get("status", "")) == "completed"}
-
-    def deps_ok(t: dict[str, Any]) -> bool:
-        deps = t.get("depends_on") or []
-        if not isinstance(deps, list):
-            return False
-        return all(str(d) in completed for d in deps)
-
-    def attempts(t: dict[str, Any]) -> int:
-        try:
-            return int(t.get("attempts") or 0)
-        except Exception:
-            return 0
-
-    def max_attempts(t: dict[str, Any]) -> int:
-        try:
-            v = t.get("max_attempts")
-            return int(v) if v is not None else 3
-        except Exception:
-            return 3
-
-    pending = [t for t in tasks if str(t.get("status", "")) == "pending" and deps_ok(t)]
-    retryable = [
-        t for t in tasks
-        if str(t.get("status", "")) == "failed"
-        and attempts(t) < max_attempts(t)
-        and deps_ok(t)
-    ]
-    def key(t: dict[str, Any]) -> tuple[int, str]:
-        return (_priority_rank(t.get("priority")), str(t.get("id", "")))
-    pending.sort(key=key)
-    retryable.sort(key=key)
+    # Retryability uses the same failure count the Stop hook enforces --
+    # max(attempts, logged ERROR lines) -- so a task the Stop hook already
+    # ruled out cannot keep a teammate awake here.
+    pending, retryable = hc.eligible_tasks(tasks, hc.progress_logged_failures(root))
     in_progress = [t for t in tasks if str(t.get("status", "")) == "in_progress"]
 
     # Check if this teammate owns any in-progress tasks

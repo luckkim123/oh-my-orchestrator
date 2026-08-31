@@ -10,11 +10,6 @@ type CodexBackend = legacy.CodexBackend
 type ClaudeBackend = legacy.ClaudeBackend
 type AgyBackend = legacy.AgyBackend
 
-// GeminiBackend and OpencodeBackend are no longer in the registry (omo D24)
-// and cannot be selected; the aliases stay while the parser and the stderr
-// filter still name them.
-type GeminiBackend = legacy.GeminiBackend
-type OpencodeBackend = legacy.OpencodeBackend
 type MinimalClaudeSettings = legacy.MinimalClaudeSettings
 
 func Registry() map[string]Backend { return legacy.Registry() }
@@ -30,5 +25,3 @@ func BuildCodexArgs(cfg *config.Config, targetArg string) []string {
 func LoadMinimalClaudeSettings() MinimalClaudeSettings { return legacy.LoadMinimalClaudeSettings() }
 
 func LoadMinimalEnvSettings() map[string]string { return legacy.LoadMinimalEnvSettings() }
-
-func LoadGeminiEnv() map[string]string { return legacy.LoadGeminiEnv() }

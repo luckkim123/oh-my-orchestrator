@@ -9,8 +9,8 @@ import (
 // AgyBackend drives the Antigravity CLI (`agy`), which replaced `gemini` as
 // the reachable Google-family vendor here (omo D24, 2026-08-28). Its flag
 // surface reads like Claude Code's, but three measured differences (agy
-// 1.1.22, 2026-08-28) make it its own backend rather than a rename of
-// GeminiBackend:
+// 1.1.22, 2026-08-28) made it its own backend rather than a rename of
+// the retired gemini one (both deleted in 0.20.0):
 //
 //  1. `--print` takes the prompt as a flag VALUE. It never reads stdin:
 //     `--print` with no value errors "flag needs an argument", and
@@ -26,7 +26,7 @@ import (
 //     parser carries an agy branch.
 //
 // Auth is the CLI's own subscription session; no base URL or API key env is
-// involved, so Env is nil like OpencodeBackend's.
+// involved, so Env is nil.
 type AgyBackend struct{}
 
 func (AgyBackend) Name() string                                 { return "agy" }

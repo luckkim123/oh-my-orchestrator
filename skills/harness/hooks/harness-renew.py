@@ -2,14 +2,10 @@
 from __future__ import annotations
 
 import datetime as _dt
-import hashlib
 import json
 import os
-import shutil
 import sys
-import time
 from pathlib import Path
-from typing import Any, Optional
 
 # Board resolution and the activation gate live in one place; a hook that carried
 # its own copy would drift the moment the gate changed. Missing helper module =>
@@ -21,118 +17,9 @@ except ImportError:
     hc = None  # type: ignore[assignment]
 
 
-
-def _utc_now() -> _dt.datetime:
-    return _dt.datetime.now(tz=_dt.timezone.utc)
-
-
-def _iso_z(dt: _dt.datetime) -> str:
-    dt = dt.astimezone(_dt.timezone.utc).replace(microsecond=0)
-    return dt.isoformat().replace("+00:00", "Z")
-
-
-def _read_payload() -> dict[str, Any]:
-    raw = sys.stdin.read()
-    if not raw.strip():
-        return {}
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _find_state_root(payload: dict[str, Any]) -> Optional[Path]:
-    """Locate the root holding .hq/runtime/board.json, .orchestration/board.json,
-    or harness-tasks.json."""
-    if hc is None:
-        return None
-    return hc.find_harness_root(payload)
-
-
-def _lockdir_for_root(root: Path) -> Path:
-    h = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:16]
-    return Path("/tmp") / f"harness-{h}.lock"
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except Exception:
-        return False
-
-
-def _read_pid(lockdir: Path) -> Optional[int]:
-    try:
-        raw = (lockdir / "pid").read_text("utf-8").strip()
-        return int(raw) if raw else None
-    except Exception:
-        return None
-
-
-def _acquire_lock(lockdir: Path, timeout_seconds: float) -> None:
-    deadline = time.time() + timeout_seconds
-    missing_pid_since: Optional[float] = None
-    while True:
-        try:
-            lockdir.mkdir(mode=0o700)
-            (lockdir / "pid").write_text(str(os.getpid()), encoding="utf-8")
-            return
-        except FileExistsError:
-            pid = _read_pid(lockdir)
-            if pid is None:
-                if missing_pid_since is None:
-                    missing_pid_since = time.time()
-                if time.time() - missing_pid_since < 1.0:
-                    if time.time() >= deadline:
-                        raise TimeoutError("lock busy (pid missing)")
-                    time.sleep(0.05)
-                    continue
-            else:
-                missing_pid_since = None
-                if _pid_alive(pid):
-                    if time.time() >= deadline:
-                        raise TimeoutError(f"lock busy (pid={pid})")
-                    time.sleep(0.05)
-                    continue
-
-            stale = lockdir.with_name(f"{lockdir.name}.stale.{os.getpid()}.{int(time.time())}")
-            try:
-                lockdir.rename(stale)
-            except Exception:
-                if time.time() >= deadline:
-                    raise TimeoutError("lock contention")
-                time.sleep(0.05)
-                continue
-            shutil.rmtree(stale, ignore_errors=True)
-            missing_pid_since = None
-            continue
-
-
-def _release_lock(lockdir: Path) -> None:
-    shutil.rmtree(lockdir, ignore_errors=True)
-
-
-def _load_state(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError("harness-tasks.json must be an object")
-    return data
-
-
-def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
-    bak = path.with_name(f"{path.name}.bak")
-    tmp = path.with_name(f"{path.name}.tmp")
-    shutil.copy2(path, bak)
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
-
-
 def main() -> int:
-    payload = _read_payload()
-    root = _find_state_root(payload)
+    payload = hc.read_hook_payload() if hc else {}
+    root = hc.find_harness_root(payload) if hc else None
     if root is None:
         print(json.dumps({"renewed": False, "error": "state root not found"}, ensure_ascii=False))
         return 0
@@ -148,22 +35,19 @@ def main() -> int:
         return 0
     lease_seconds = int(os.environ.get("HARNESS_LEASE_SECONDS") or "1800")
 
-    tasks_path = hc.state_path(root) if hc else (root / "harness-tasks.json")
-    lockdir = _lockdir_for_root(root)
+    tasks_path = hc.state_path(root)
+    lockdir = hc.lockdir_for_root(root)
 
     timeout_s = float(os.environ.get("HARNESS_LOCK_TIMEOUT_SECONDS") or "5")
     try:
-        _acquire_lock(lockdir, timeout_s)
+        hc.acquire_lock(lockdir, timeout_s)
     except Exception as e:
         print(json.dumps({"renewed": False, "error": str(e)}, ensure_ascii=False))
         return 0
 
     try:
-        state = _load_state(tasks_path)
-        tasks_raw = state.get("tasks") or []
-        if not isinstance(tasks_raw, list):
-            raise ValueError("tasks must be a list")
-        tasks = [t for t in tasks_raw if isinstance(t, dict)]
+        state = hc.load_json(tasks_path)
+        tasks = hc.parse_tasks(state)
 
         task = next((t for t in tasks if str(t.get("id") or "") == task_id), None)
         if task is None:
@@ -179,12 +63,12 @@ def main() -> int:
             print(json.dumps({"renewed": False, "error": "task owned by other worker"}, ensure_ascii=False))
             return 0
 
-        now = _utc_now()
+        now = hc.utc_now()
         exp = now + _dt.timedelta(seconds=lease_seconds)
-        task["lease_expires_at"] = _iso_z(exp)
+        task["lease_expires_at"] = hc.iso_z(exp)
         task["claimed_by"] = worker_id
         state["tasks"] = tasks
-        _atomic_write_json(tasks_path, state)
+        hc.atomic_write_json(tasks_path, state)
 
         print(json.dumps({"renewed": True, "task_id": task_id, "lease_expires_at": task["lease_expires_at"]}, ensure_ascii=False))
         return 0
@@ -192,7 +76,7 @@ def main() -> int:
         print(json.dumps({"renewed": False, "error": str(e)}, ensure_ascii=False))
         return 0
     finally:
-        _release_lock(lockdir)
+        hc.release_lock(lockdir)
 
 
 if __name__ == "__main__":

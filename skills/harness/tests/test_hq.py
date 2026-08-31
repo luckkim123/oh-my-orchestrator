@@ -1659,3 +1659,33 @@ class QueryPostIdAscendTest(unittest.TestCase):
             got = verbs.query(inner, post_id="handoff/001", ascend=True)["post"]
             self.assertEqual(got["title"], "The Local One")
             self.assertEqual(got["anchor"], "inner-anchor")
+
+
+class CliPostDateTest(unittest.TestCase):
+    """`hq post --date` writes the given frontmatter date -- finding/098:
+    every migration used to need a post-hoc sed. ISO validation must still
+    reject a non-YYYY-MM-DD value."""
+
+    def _post(self, root: Path, extra: list[str]) -> int:
+        from hq import cli
+        body = root / "b.md"
+        body.write_text("body.\n", encoding="utf-8")
+        return cli.main(["--anchor", str(root), "post", "--category", "finding",
+                         "--title", "Backfilled", "--author", "test",
+                         "--summary", "s", "--body-file", str(body)] + extra)
+
+    def test_date_flag_lands_in_frontmatter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            rc = self._post(root, ["--date", "2026-01-01"])
+            self.assertEqual(rc, 0)
+            page = next((store.community_dir(root) / "posts" / "finding").glob("*.md"))
+            self.assertIn("date: 2026-01-01", page.read_text(encoding="utf-8"))
+
+    def test_bad_date_still_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_anchor(root, "a")
+            rc = self._post(root, ["--date", "01/01/2026"])
+            self.assertNotEqual(rc, 0)

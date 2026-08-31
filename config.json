@@ -97,7 +97,7 @@
           "type": "copy_file",
           "source": "skills/omo/references/security.md",
           "target": "skills/omo/references/security.md",
-          "description": "Install develop agent prompt"
+          "description": "Install security agent prompt"
         },
         {
           "type": "copy_file",

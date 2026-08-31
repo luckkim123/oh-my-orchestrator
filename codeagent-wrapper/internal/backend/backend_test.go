@@ -94,16 +94,6 @@ func TestBackendBuildArgs_Model(t *testing.T) {
 		}
 	})
 
-	t.Run("gemini includes -m when set", func(t *testing.T) {
-		backend := GeminiBackend{}
-		cfg := &config.Config{Mode: "new", Model: "gemini-3-pro-preview"}
-		got := backend.BuildArgs(cfg, "task")
-		want := []string{"-o", "stream-json", "-y", "-m", "gemini-3-pro-preview", "task"}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got %v, want %v", got, want)
-		}
-	})
-
 	t.Run("codex includes --model when set", func(t *testing.T) {
 		const key = "CODEX_BYPASS_SANDBOX"
 		t.Setenv(key, "false")
@@ -118,54 +108,7 @@ func TestBackendBuildArgs_Model(t *testing.T) {
 	})
 }
 
-func TestClaudeBuildArgs_GeminiAndCodexModes(t *testing.T) {
-	t.Run("gemini new mode defaults workdir", func(t *testing.T) {
-		backend := GeminiBackend{}
-		cfg := &config.Config{Mode: "new", WorkDir: "/workspace"}
-		got := backend.BuildArgs(cfg, "task")
-		want := []string{"-o", "stream-json", "-y", "task"}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got %v, want %v", got, want)
-		}
-	})
-
-	t.Run("gemini resume mode uses session id", func(t *testing.T) {
-		backend := GeminiBackend{}
-		cfg := &config.Config{Mode: "resume", SessionID: "sid-999"}
-		got := backend.BuildArgs(cfg, "resume")
-		want := []string{"-o", "stream-json", "-y", "-r", "sid-999", "resume"}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got %v, want %v", got, want)
-		}
-	})
-
-	t.Run("gemini resume mode without session omits identifier", func(t *testing.T) {
-		backend := GeminiBackend{}
-		cfg := &config.Config{Mode: "resume"}
-		got := backend.BuildArgs(cfg, "resume")
-		want := []string{"-o", "stream-json", "-y", "resume"}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got %v, want %v", got, want)
-		}
-	})
-
-	t.Run("gemini nil config returns nil", func(t *testing.T) {
-		backend := GeminiBackend{}
-		if backend.BuildArgs(nil, "ignored") != nil {
-			t.Fatalf("nil config should return nil args")
-		}
-	})
-
-	t.Run("gemini stdin mode uses -p flag", func(t *testing.T) {
-		backend := GeminiBackend{}
-		cfg := &config.Config{Mode: "new"}
-		got := backend.BuildArgs(cfg, "-")
-		want := []string{"-o", "stream-json", "-y", "-p", "-"}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got %v, want %v", got, want)
-		}
-	})
-
+func TestBuildArgs_CodexModes(t *testing.T) {
 	t.Run("codex build args omits bypass flag by default", func(t *testing.T) {
 		const key = "CODEX_BYPASS_SANDBOX"
 		t.Setenv(key, "false")
@@ -201,7 +144,6 @@ func TestClaudeBuildArgs_BackendMetadata(t *testing.T) {
 	}{
 		{backend: CodexBackend{}, name: "codex", command: "codex"},
 		{backend: ClaudeBackend{}, name: "claude", command: "claude"},
-		{backend: GeminiBackend{}, name: "gemini", command: "gemini"},
 	}
 
 	for _, tt := range tests {
@@ -273,64 +215,4 @@ func TestLoadMinimalEnvSettings(t *testing.T) {
 			t.Fatalf("got %v, want empty", got)
 		}
 	})
-}
-
-func TestOpencodeBackend_BuildArgs(t *testing.T) {
-	backend := OpencodeBackend{}
-
-	t.Run("basic", func(t *testing.T) {
-		cfg := &config.Config{Mode: "new"}
-		got := backend.BuildArgs(cfg, "hello")
-		want := []string{"run", "--format", "json", "hello"}
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-	})
-
-	t.Run("with model", func(t *testing.T) {
-		cfg := &config.Config{Mode: "new", Model: "opencode/grok-code"}
-		got := backend.BuildArgs(cfg, "task")
-		want := []string{"run", "-m", "opencode/grok-code", "--format", "json", "task"}
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-	})
-
-	t.Run("resume mode", func(t *testing.T) {
-		cfg := &config.Config{Mode: "resume", SessionID: "ses_123", Model: "opencode/grok-code"}
-		got := backend.BuildArgs(cfg, "follow-up")
-		want := []string{"run", "-m", "opencode/grok-code", "-s", "ses_123", "--format", "json", "follow-up"}
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-	})
-
-	t.Run("resume without session", func(t *testing.T) {
-		cfg := &config.Config{Mode: "resume"}
-		got := backend.BuildArgs(cfg, "task")
-		want := []string{"run", "--format", "json", "task"}
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-	})
-
-	t.Run("stdin mode omits dash", func(t *testing.T) {
-		cfg := &config.Config{Mode: "new"}
-		got := backend.BuildArgs(cfg, "-")
-		want := []string{"run", "--format", "json"}
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-	})
-}
-
-func TestOpencodeBackend_Interface(t *testing.T) {
-	backend := OpencodeBackend{}
-
-	if backend.Name() != "opencode" {
-		t.Errorf("Name() = %q, want %q", backend.Name(), "opencode")
-	}
-	if backend.Command() != "opencode" {
-		t.Errorf("Command() = %q, want %q", backend.Command(), "opencode")
-	}
 }

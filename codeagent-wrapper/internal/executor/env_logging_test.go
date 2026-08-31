@@ -286,34 +286,6 @@ func TestEnvLoggingIntegration(t *testing.T) {
 	}
 }
 
-// TestGeminiBackendEnv tests GeminiBackend.Env for comparison
-func TestGeminiBackendEnv(t *testing.T) {
-	b := backend.GeminiBackend{}
-	env := b.Env("https://custom.api", "gemini-api-key-12345")
-
-	if env == nil {
-		t.Fatal("expected non-nil env")
-	}
-
-	// Check that GEMINI env vars are set
-	if _, ok := env["GOOGLE_GEMINI_BASE_URL"]; !ok {
-		t.Error("expected GOOGLE_GEMINI_BASE_URL in env")
-	}
-	if _, ok := env["GEMINI_API_KEY"]; !ok {
-		t.Error("expected GEMINI_API_KEY in env")
-	}
-
-	// Verify masking works for Gemini keys too
-	for k, v := range env {
-		masked := maskSensitiveValue(k, v)
-		if strings.Contains(strings.ToLower(k), "key") {
-			if masked == v && len(v) > 0 {
-				t.Errorf("key %q should be masked", k)
-			}
-		}
-	}
-}
-
 // TestCodexBackendEnv tests CodexBackend.Env
 func TestCodexBackendEnv(t *testing.T) {
 	b := backend.CodexBackend{}

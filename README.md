@@ -41,10 +41,11 @@ gates, and experiment SSOTs are never delegated.
 
 ## Status
 
-Early. Phase 0 (hook-surface measurement) is done and it changed the design:
-`SubagentStart` cannot block a spawn, and `TeammateIdle` never fires for
-Agent-tool subagents, so enforcement lives entirely on `SubagentStop`. Phases 1–5
-are in progress.
+Working. Phases 0–5 are complete (see `CHANGELOG.md`). Phase 0's hook-surface
+measurement still shapes the design: `SubagentStart` cannot block a spawn, and
+`TeammateIdle` never fires for Agent-tool subagents, so enforcement lives
+entirely on `SubagentStop`. The store cutover to `.hq/` (anchor-gated), the
+delegation-gate redesign (0.15.0), and the call ledger (0.19.0) are all live.
 
 ## Modules
 
@@ -63,12 +64,39 @@ kept so `git fetch upstream` keeps working — they are not deleted.
 
 ## Install
 
+Three parts ship separately; all three are needed for the full harness.
+
+**1. The plugin** (skills + hooks) — install through Claude Code's plugin
+system (`/plugin` in the CLI), from a marketplace that carries
+`oh-my-orchestrator` or from this repository. After each release,
+`claude plugin update oh-my-orchestrator` — the manifest version in
+`.claude-plugin/plugin.json` is the only delivery surface; skills and hooks
+do not update without the bump.
+
+**2. The wrapper** — built from source, no binary is downloaded:
+
 ```bash
-python3 install.py
+cd codeagent-wrapper && make build && make install   # installs to $GOBIN (default ~/go/bin)
+ln -sf "$(go env GOPATH)/bin/codeagent-wrapper" ~/.local/bin/codeagent-wrapper
+codeagent-wrapper --version   # must match the top of CHANGELOG.md
 ```
 
-Edit `config.json` to change which modules are enabled. Only `omo` and `harness`
-are on by default.
+`$GOBIN` is frequently not on `PATH`. The symlink keeps every future
+`make install` live with no second step — without it, a stale hand-copied
+build can shadow the fresh one while every existence check passes (the
+0.19.1 incident).
+
+**3. The role table** — the wrapper resolves `--agent <role>` from
+`~/.codeagent/models.json` and fails loud with a template hint when it is
+missing. Seed it with your role→backend/model bindings; the shape and this
+repo's defaults are the `agents` blocks in `config.json`. The legacy
+`python3 install.py` merges those blocks into `models.json` for you, but it
+is the npx-era installer, not the plugin route. Do not run `install.sh`: it
+downloads an upstream binary that overwrites a local build
+(`skills/omo/references/vendor-ops.md`).
+
+Edit `config.json` to change which modules are enabled. Only `omo` and
+`harness` are on by default.
 
 ## Backend CLIs
 
@@ -77,7 +105,6 @@ are on by default.
 | Codex | `codex exec --sandbox read-only "<prompt>" < /dev/null` | `--full-auto` does not exist. Close stdin or it waits 3s |
 | Antigravity | `agy --print-timeout 45s --print='<prompt>' < /dev/null` | Binary is `agy`, not `antigravity`. Attach the prompt to `--print=` or the next flag is eaten as the prompt |
 | Claude | `--output-format stream-json`, `-r` | |
-| Gemini | `-o stream-json`, `-y`, `-r` | |
 
 An invalid `--model` is not rejected by the CLI — it fails as an API 400. Catch it.
 

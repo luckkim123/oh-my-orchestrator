@@ -464,6 +464,12 @@ consider the source — which under §7 stays put until `--purge` anyway.
 
 ## 9. The full mapping table
 
+> **Non-normative — origin-machine migration record.** Everything in §9 is the
+> 2026-08 census of the machines this store design was migrated on (`ksm-mac`
+> and its vault); the paths and project names are that operator's, not part of
+> the spec. Nothing below binds a new deployment — the normative contract ends
+> at §8.
+
 > **The anchor column below is a 2026-08-27 snapshot and four of its rows no longer
 > exist.** On 2026-08-29 the vault's four anchors (`vault`, `vault-albc`,
 > `vault-harness`, `vault-krit-simulator`) merged into one at the repo root under the

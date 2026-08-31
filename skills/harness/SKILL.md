@@ -85,7 +85,8 @@ has no fallback) rather than fall quiet.
 **Legacy roots.** A project that still has `harness-tasks.json` and no
 `.orchestration/` keeps gating on the old `.harness-active` marker file, and hooks
 read `harness-tasks.json` as before. When both exist, the board wins. Migrate by
-writing `.orchestration/board.json` and removing the marker.
+writing the board — `.hq/runtime/board.json` under a `.hq/.anchor`, or
+`.orchestration/board.json` on an unanchored project — and removing the marker.
 
 ## Board (`.hq/runtime/board.json`)
 
@@ -301,18 +302,26 @@ In concurrent mode (see Concurrency Control), tasks may also carry claim metadat
 
 ## Concurrency Control
 
-Before modifying `harness-tasks.json`, acquire an exclusive lock using portable `mkdir` (atomic on all POSIX systems, works on both macOS and Linux):
+Before modifying the state file (the board; legacy `harness-tasks.json`), acquire an exclusive lock using portable `mkdir` (atomic on all POSIX systems, works on both macOS and Linux):
 
 ```bash
 # Acquire lock (fail fast if another agent is running)
-# Lock key must be stable even if invoked from a subdirectory.
-ROOT="$PWD"
-SEARCH="$PWD"
-while [ "$SEARCH" != "/" ] && [ ! -f "$SEARCH/harness-tasks.json" ]; do
-  SEARCH="$(dirname "$SEARCH")"
-done
-if [ -f "$SEARCH/harness-tasks.json" ]; then
-  ROOT="$SEARCH"
+# Lock key must match the hooks' (_harness_common.find_harness_root +
+# lockdir_for_root): HARNESS_STATE_ROOT first when it carries a marker, else
+# ascend from the PHYSICAL cwd (pwd -P -- the hooks hash the resolved path,
+# so a symlinked cwd would otherwise hash a different key) to the root
+# carrying one of the three state markers (ROOT_MARKERS).
+has_marker() {
+  [ -f "$1/.hq/runtime/board.json" ] || [ -f "$1/.orchestration/board.json" ] || [ -f "$1/harness-tasks.json" ]
+}
+ROOT="${HARNESS_STATE_ROOT:-}"
+[ -n "$ROOT" ] && ROOT="$(cd "$ROOT" 2>/dev/null && pwd -P || printf '%s' "$ROOT")"
+if [ -z "$ROOT" ] || ! has_marker "$ROOT"; then
+  SEARCH="$(pwd -P)"
+  while [ "$SEARCH" != "/" ] && ! has_marker "$SEARCH"; do
+    SEARCH="$(dirname "$SEARCH")"
+  done
+  if has_marker "$SEARCH"; then ROOT="$SEARCH"; else ROOT="$(pwd -P)"; fi
 fi
 
 PWD_HASH="$(
@@ -321,7 +330,7 @@ PWD_HASH="$(
     awk '{print $1}' |
     cut -c1-16
 )"
-LOCKDIR="/tmp/harness-${PWD_HASH:-unknown}.lock"
+LOCKDIR="${TMPDIR:-/tmp}/harness-${PWD_HASH:-unknown}.lock"
 if ! mkdir "$LOCKDIR" 2>/dev/null; then
   # Check if lock holder is still alive
   LOCK_PID=$(cat "$LOCKDIR/pid" 2>/dev/null)
@@ -360,7 +369,7 @@ Concurrent mode invariants:
 
 ### Session Start (Execute Every Time)
 
-1. **Read state**: Read last 200 lines of `harness-progress.txt` + full `harness-tasks.json`. If JSON is unparseable, see JSON corruption recovery in Error Handling.
+1. **Read state**: Read last 200 lines of `harness-progress.txt` + the full state file (the board; legacy `harness-tasks.json`). If JSON is unparseable, see JSON corruption recovery in Error Handling.
 2. **Read git**: Run `git log --oneline -20` and `git diff --stat` to detect uncommitted work
 3. **Acquire lock** (mode-dependent): Exclusive mode fails if another session is active. Concurrent mode uses the lock only for state transactions.
 4. **Recover interrupted tasks** (see Context Window Recovery below)
@@ -373,12 +382,12 @@ Concurrent mode invariants:
 Before selecting, run dependency validation:
 
 1. **Cycle detection**: For each non-completed task, walk `depends_on` transitively. If any task appears in its own chain, mark it `failed` with `[DEPENDENCY] Circular dependency detected: task-A -> task-B -> task-A`. Self-references (`depends_on` includes own id) are also cycles.
-2. **Blocked propagation**: If a task's `depends_on` includes a task that is `failed` and will never be retried (either `attempts >= max_attempts` OR its `error_log` contains a `[DEPENDENCY]` entry), mark the blocked task as `failed` with `[DEPENDENCY] Blocked by failed task-XXX`. Repeat until no more tasks can be propagated.
+2. **Blocked propagation**: If a task's `depends_on` includes a task that is `failed` and will never be retried (either its effective failure count -- `max(attempts, ERROR lines for that id in the progress log)`, see Retry Escalation -- has reached `max_attempts`, OR its `error_log` contains a `[DEPENDENCY]` entry), mark the blocked task as `failed` with `[DEPENDENCY] Blocked by failed task-XXX`. Repeat until no more tasks can be propagated.
 
 Then pick the next task in this priority order:
 
 1. Tasks with `status: "pending"` where ALL `depends_on` tasks are `completed` — sorted by `priority` (P0 > P1 > P2), then by `id` (lowest first)
-2. Tasks with `status: "failed"` where `attempts < max_attempts` and ALL `depends_on` are `completed` — sorted by priority, then oldest failure first
+2. Tasks with `status: "failed"` whose effective failure count (`max(attempts, logged ERROR lines)` — the count every hook enforces) is below `max_attempts`, and ALL `depends_on` are `completed` — sorted by priority, then oldest failure first
 3. If no eligible tasks remain → log final STATS → STOP
 
 ### Retry Escalation (3-Strike)
@@ -394,7 +403,7 @@ same failure again, so before retrying, change one of these and say which:
 
 1. **The vendor** — route the task to a different *model* than the last attempt
    used. A different backend running the same model family is the same prior, not a
-   second opinion. This is `omo` delegation ground 1.
+   second opinion. This is `omo` delegation ground 3.
 2. **The approach** — state the new hypothesis and how it differs from the two that
    failed.
 
@@ -469,9 +478,9 @@ Each error category has a default recovery strategy:
 | `DEPENDENCY` | Skip task, mark blocked | Log which dependency failed, mark task as `failed` with dependency reason |
 | `SESSION_TIMEOUT` | Use Context Window Recovery Protocol | New session assesses partial progress via Recovery Protocol — may result in completion or failure depending on validation |
 
-**JSON corruption**: If `harness-tasks.json` cannot be parsed, check for `harness-tasks.json.bak` (written before each modification). If backup exists and is valid, restore from it. If no valid backup, log `ERROR [ENV_SETUP] harness-tasks.json corrupted and unrecoverable` and STOP — task metadata (validation commands, dependencies, cleanup) cannot be reconstructed from logs alone.
+**JSON corruption**: If the state file (`board.json`; legacy `harness-tasks.json`) cannot be parsed, check for its `.bak` sibling (written before each modification). If backup exists and is valid, restore from it. If no valid backup, log `ERROR [ENV_SETUP] state file corrupted and unrecoverable` and STOP — task metadata (validation commands, dependencies, cleanup) cannot be reconstructed from logs alone.
 
-**Backup protocol**: Before every write to `harness-tasks.json`, copy the current file to `harness-tasks.json.bak`. Write updates atomically: write JSON to `harness-tasks.json.tmp` then `mv` it into place (readers should never see a partial file).
+**Backup protocol**: Before every write to the state file, copy the current file to its `.bak` sibling. Write updates atomically: write JSON to a `.tmp` sibling then `mv` it into place (readers should never see a partial file).
 
 ## Environment Initialization
 
@@ -513,7 +522,7 @@ grep "RECOVERY" harness-progress.txt                 # All recovery actions
 
 ## Session Statistics
 
-At session end, update `harness-tasks.json`: set `last_session` to current timestamp. (Do NOT increment `session_count` here — it is incremented at Session Start.) Then append:
+At session end, update the state file: set `last_session` to current timestamp. (Do NOT increment `session_count` here — it is incremented at Session Start.) Then append:
 
 ```
 [timestamp] [SESSION-N] STATS tasks_total=10 completed=7 failed=1 pending=2 blocked=0 attempts_total=12 checkpoints=23
@@ -551,7 +560,7 @@ migrates, drop the question rather than asking it about both layouts.
 
 ## Status Command (`/harness status`)
 
-Read `harness-tasks.json` and `harness-progress.txt`, then display:
+Read the state file and `harness-progress.txt`, then display:
 
 1. Task summary: count by status (completed, failed, pending, blocked). `blocked` = pending tasks whose `depends_on` includes a permanently failed task (computed, not a stored status).
 2. Per-task one-liner: `[status] task-id: title (attempts/max_attempts)`
@@ -562,7 +571,7 @@ Does NOT acquire the lock (read-only operation).
 
 ## Add Command (`/harness add`)
 
-Append a new task to `harness-tasks.json` with auto-incremented id (`task-NNN`), status `pending`, default `max_attempts: 3`, empty `depends_on`, and no validation command (required before the task can be completed). Prompt user for optional fields: `priority`, `depends_on`, `validation.command`, `timeout_seconds`. Requires lock acquisition (modifies JSON).
+Append a new task to the state file with auto-incremented id (`task-NNN`), status `pending`, default `max_attempts: 3`, empty `depends_on`, and no validation command (required before the task can be completed). Prompt user for optional fields: `priority`, `depends_on`, `validation.command`, `timeout_seconds`. Requires lock acquisition (modifies JSON).
 
 ## Tool Dependencies
 

@@ -16,16 +16,29 @@ import sys
 from pathlib import Path
 
 try:
-    from . import __version__, post, verbs
+    from . import post, verbs
     from .anchor import HqError, find_anchor_root
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from hq import __version__, post, verbs
+    from hq import post, verbs
     from hq.anchor import HqError, find_anchor_root
 
 
 def _now_date() -> str:
     return datetime.date.today().isoformat()
+
+
+def _plugin_version() -> str:
+    """The plugin manifest is the only version surface (see 0.19.1/0.19.2
+    Notes); a separate lineage here is the presence-not-currency trap."""
+    try:
+        for base in Path(__file__).resolve().parents:
+            pj = base / ".claude-plugin" / "plugin.json"
+            if pj.is_file():
+                return str(json.loads(pj.read_text(encoding="utf-8"))["version"])
+    except Exception:
+        pass
+    return "unknown"
 
 
 def _read_body(path_arg: str) -> str:
@@ -78,6 +91,9 @@ def build_parser() -> argparse.ArgumentParser:
     post_p.add_argument("--status", default="none")
     post_p.add_argument("--verified", default=None)
     post_p.add_argument("--keywords", default=None, help="comma-separated")
+    post_p.add_argument("--date", default=None,
+                        help="YYYY-MM-DD frontmatter date; default today. For "
+                             "migrations/backfill -- finding/098's post-hoc sed.")
 
     comment_p = sub.add_parser("comment")
     comment_p.add_argument("post_id")
@@ -137,7 +153,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     if args.version:
-        print(__version__)
+        print(_plugin_version())
         return 0
 
     if not args.verb:
@@ -158,7 +174,7 @@ def main(argv=None) -> int:
                 project=args.project,
                 subject=args.subject, supersedes=args.supersedes, topic=args.topic,
                 confidence=args.confidence, status=args.status, verified=args.verified,
-                keywords=keywords, now=_now_date(),
+                keywords=keywords, now=args.date or _now_date(),
             )
             _print(result, args.json)
             return 0

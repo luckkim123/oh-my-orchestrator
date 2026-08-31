@@ -7,12 +7,11 @@ store.py), so unlike the other four repos' paths modules this one declares
 BOTH `HQ_ROOT` and `LEGACY_ROOT` — there is no single literal to centralize,
 there are two, and P2 does not pick a winner between them.
 
-**P2 is behavior-unchanged.** Every helper below returns exactly the path
-today's inline code computed before this module existed. `.hq` is not yet the
-live root anywhere — `community_dir()` in store.py still resolves to
-`.orchestration/` in every real target, and `has_legacy_store()` still gates
-on `.orchestration/`. The switch to `.hq` as the live root, and any read
-fallback between the two, is P3+, not here.
+**Which root is live is anchor-gated, per project** (store-spec.md §7
+stage 2, live since 0.8.0): a parseable `.hq/.anchor` resolves reads and
+writes to `.hq/` only; a project without one keeps resolving to
+`.orchestration/`. `community_dir()` in store.py implements that gate — the
+helpers here only declare the literals and never pick the winner.
 
 Hooks under hooks/ deliberately do NOT import this module. See
 hooks/_harness_common.py's own module docstring and

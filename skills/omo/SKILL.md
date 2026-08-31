@@ -132,7 +132,7 @@ A vendor CLI does not inherit your session rules. It gets them from the communit
 store (`.hq/community/`, or the legacy `.orchestration/`), and how depends on the
 backend:
 
-- **codex, gemini, antigravity** -- a `context-loader` skill attached to the vendor's
+- **codex, antigravity** -- a `context-loader` skill attached to the vendor's
   own session config, so it loads every task and is not competing with the task text
   for prompt budget.
 - **claude** -- no loader is possible. `backend/claude.go` passes

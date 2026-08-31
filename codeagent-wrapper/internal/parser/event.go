@@ -66,16 +66,6 @@ type ClaudeEvent struct {
 	Result    string `json:"result,omitempty"`
 }
 
-// GeminiEvent for Gemini stream-json format.
-type GeminiEvent struct {
-	Type      string `json:"type"`
-	SessionID string `json:"session_id,omitempty"`
-	Role      string `json:"role,omitempty"`
-	Content   string `json:"content,omitempty"`
-	Delta     bool   `json:"delta,omitempty"`
-	Status    string `json:"status,omitempty"`
-}
-
 // UnifiedEvent combines all backend event formats into a single structure
 // to avoid multiple JSON unmarshal operations per event.
 type UnifiedEvent struct {
@@ -100,31 +90,14 @@ type UnifiedEvent struct {
 	TotalCostUSD *float64                   `json:"total_cost_usd,omitempty"`
 	ModelUsage   map[string]json.RawMessage `json:"modelUsage,omitempty"`
 
-	// Gemini-specific fields
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
-	Delta   *bool  `json:"delta,omitempty"`
-	Status  string `json:"status,omitempty"`
-
-	// Opencode-specific fields (camelCase sessionID)
-	OpencodeSessionID string          `json:"sessionID,omitempty"`
-	Part              json.RawMessage `json:"part,omitempty"`
-
 	// Agy-specific fields. agy runs under `--output-format json`, which emits
-	// exactly one object rather than a stream, so these three carry the whole
-	// result. `Status` above is shared with the gemini shape, which is why the
-	// agy branch in parser.go has to be tested before the gemini one.
+	// exactly one object rather than a stream, so these carry the whole
+	// result. `Status` doubles as a guard in the claude detection
+	// (`event.Status == ""`); it came from the retired gemini stream shape.
+	Status         string `json:"status,omitempty"`
 	ConversationID string `json:"conversation_id,omitempty"`
 	Response       string `json:"response,omitempty"`
 	Error          string `json:"error,omitempty"`
-}
-
-// OpencodePart represents the part field in opencode events.
-type OpencodePart struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	SessionID string `json:"sessionID,omitempty"`
 }
 
 // ItemContent represents the parsed item.text field for Codex events.

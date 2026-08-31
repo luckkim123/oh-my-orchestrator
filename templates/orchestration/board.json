@@ -1,5 +1,5 @@
 {
-  "_comment": "Seed for .orchestration/board.json -- the only state the hooks read. Delete _comment fields once real. status is the activation gate: every hook exits 0 immediately unless it reads \"active\".",
+  "_comment": "Seed for the board -- .hq/runtime/board.json under a .hq/.anchor, .orchestration/board.json on an unanchored project -- the only state the hooks read. Delete _comment fields once real. status is the activation gate: every hook exits 0 immediately unless it reads \"active\".",
 
   "status": "active",
   "owning_session": "replace-with-session-name",

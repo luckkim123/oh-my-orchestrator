@@ -22,6 +22,7 @@ IDLE_HOOK = HOOKS_DIR / "harness-teammateidle.py"
 SUBAGENT_HOOK = HOOKS_DIR / "harness-subagentstop.py"
 SUBAGENT_START_HOOK = HOOKS_DIR / "harness-subagentstart.py"
 PRECOMPACT_HOOK = HOOKS_DIR / "harness-precompact.py"
+CLAIM_HOOK = HOOKS_DIR / "harness-claim.py"
 
 # Read out of the hook rather than restated here: the boundary test pins the
 # comparison, not the number. Retuning the window is a deliberate edit and must
@@ -1556,6 +1557,96 @@ class TestBoardPathFollowsTheStore(unittest.TestCase):
                          self.root / ".orchestration" / "agents" / "orca.md")
         self.assertEqual(self.hc.hub_md(self.root),
                          self.root / ".orchestration" / "HUB.md")
+
+
+# ---------------------------------------------------------------------------
+# Claim hook -- retryability must match the Stop hook's failure count
+# ---------------------------------------------------------------------------
+class TestClaimHook(unittest.TestCase):
+    """harness-claim.py judges retryability on effective attempts --
+    max(attempts, logged ERROR lines) -- the same count the Stop hook
+    enforces. Before 2026-08-31 it read raw `attempts` and would hand a
+    ruled-out task straight back into rotation."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.root = Path(self.tmpdir)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _claim(self):
+        code, stdout, stderr = run_hook(CLAIM_HOOK, {"cwd": self.tmpdir})
+        self.assertEqual(code, 0, stderr)
+        return json.loads(stdout)
+
+    def test_pending_task_is_claimed(self):
+        write_tasks(self.root, [
+            {"id": "t1", "title": "Work", "status": "pending", "priority": "P0", "depends_on": []},
+        ])
+        res = self._claim()
+        self.assertTrue(res["claimed"])
+        self.assertEqual(res["task_id"], "t1")
+        state = json.loads((self.root / "harness-tasks.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["tasks"][0]["status"], "in_progress")
+
+    def test_logged_errors_exhaust_claim_retries(self):
+        """attempts:0 with 3 logged ERRORs >= max_attempts:3 -> refuse the claim.
+
+        This is the fixture the Stop hook already allows a stop on
+        (test_logged_errors_exhaust_retries); the claim path must agree.
+        """
+        (self.root / "harness-progress.txt").write_text(
+            "[2026-08-26T10:00:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] one\n"
+            "[2026-08-26T10:05:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] two\n"
+            "[2026-08-26T10:10:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] three\n"
+        )
+        write_tasks(self.root, [
+            {"id": "t1", "status": "failed", "attempts": 0, "max_attempts": 3, "depends_on": []},
+        ])
+        res = self._claim()
+        self.assertFalse(res["claimed"])
+
+    def test_logged_errors_below_max_still_claimable(self):
+        (self.root / "harness-progress.txt").write_text(
+            "[2026-08-26T10:00:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] one\n"
+        )
+        write_tasks(self.root, [
+            {"id": "t1", "status": "failed", "attempts": 0, "max_attempts": 3, "depends_on": []},
+        ])
+        res = self._claim()
+        self.assertTrue(res["claimed"])
+
+    def test_sessionstart_does_not_advertise_exhausted_task(self):
+        """Display must agree with enforcement: a task the Stop hook ruled
+        out on logged failures must not be shown as `next=`."""
+        (self.root / "harness-progress.txt").write_text(
+            "[2026-08-26T10:00:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] one\n"
+            "[2026-08-26T10:05:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] two\n"
+            "[2026-08-26T10:10:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] three\n"
+        )
+        write_tasks(self.root, [
+            {"id": "t1", "status": "failed", "attempts": 0, "max_attempts": 3, "depends_on": []},
+        ])
+        activate(self.root)
+        code, stdout, _ = run_hook(SESSION_HOOK, {"cwd": self.tmpdir})
+        self.assertEqual(code, 0)
+        self.assertNotIn("next=t1", stdout)
+
+    def test_teammateidle_agrees_with_stop_on_logged_errors(self):
+        """A task the Stop hook ruled out must not keep a teammate awake."""
+        (self.root / "harness-progress.txt").write_text(
+            "[2026-08-26T10:00:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] one\n"
+            "[2026-08-26T10:05:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] two\n"
+            "[2026-08-26T10:10:00Z] [SESSION-1] ERROR [t1] [TASK_EXEC] three\n"
+        )
+        write_tasks(self.root, [
+            {"id": "t1", "status": "failed", "attempts": 0, "max_attempts": 3, "depends_on": []},
+        ])
+        activate(self.root)
+        code, _, _ = run_hook(IDLE_HOOK, {"cwd": self.tmpdir})
+        self.assertEqual(code, 0)
 
 
 if __name__ == "__main__":

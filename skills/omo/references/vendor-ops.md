@@ -163,11 +163,11 @@ so "codex failed, try antigravity" can route straight back into the same family.
 Check what a backend resolves to before calling it a second opinion.
 
 **This binds ground 4 as well as ground 3, and ground 4 is where it actually bites.**
-Ground 1 fails loudly -- you already know the approach is stuck. Ground 3 fails
+Ground 3 fails loudly -- you already know the approach is stuck. Ground 4 fails
 silently: `oracle` is `claude-opus-5`, so *an Opus 5 session that calls `--agent
 oracle` to review its own work has consulted itself* while believing the rule was
 satisfied. There is no error, just an approving answer from your own prior. Before
-any ground-3 call, compare the role's model against the model you are running; if
+any ground-4 call, compare the role's model against the model you are running; if
 they match, override with `--backend codex` and leave `--model` off so codex picks
 the account default. Measured 2026-08-27: that override caught a fabricated
 mechanism in the session's own docstring that a same-model reviewer had no reason
@@ -249,24 +249,19 @@ if skipped:
 3. **Its stream-json shares no field with the other backends** (everything nests
    under an `event` discriminator), so the parser drops it without erroring. The
    backend therefore runs `--output-format json` and the parser carries an agy
-   branch keyed on `conversation_id`/`response`/`error`. That branch must be tested
-   **before** the gemini one, which fires on any non-empty `status`.
+   branch keyed on `conversation_id`/`response`/`error`.
 
 Resume is `--conversation <id>`, not `-r`. Model names embed the effort tier
 (`gemini-3.1-pro-high`), and passing `--model` and `--effort` together is accepted.
 
-`GeminiBackend` and `OpencodeBackend` still compile — the parser, the stderr filter,
-and about 80 test lines name them — but `Select()` rejects both, so nothing can
-route there. Deleting that code is a separate sweep.
-
-⚠️ **The shipped binary may not have any of this.** `install.sh` downloads a
-prebuilt `codeagent-wrapper` from `stellarlinkco/myclaude` — the *upstream* repo —
-into `$HOME/.claude/bin`. That build has no `agy` backend and still carries
-`gemini`/`opencode`, and it overwrites a local build. Until this fork publishes its
-own binary, `agy` works only where someone ran `make install` from this tree.
-
-Until then, the multimodal and long-context work the lane table hands to a vendor
-goes to `claude`, not to Gemini.
+The `gemini` and `opencode` backends are gone as of 0.20.0 — `Select()` had
+rejected both since D24, and the deferred sweep deleted their code, parser
+branches, stderr patterns, and tests. `install.sh` no longer downloads the
+upstream binary either (it used to fetch a `stellarlinkco/myclaude` build with
+no `agy` backend that overwrote a local one); it now refuses and points at
+`make install`. The wrapper exists only where someone built it from this tree.
+The multimodal and long-context work the lane table hands to a Google-family
+vendor goes through `agy`; without it, `claude` carries it.
 
 ## Codex
 
@@ -335,7 +330,7 @@ Four constraints, all read out of `internal/executor/prompt.go`:
 5. **On a claude backend it is the only path.** `buildClaudeArgs` passes
    `--setting-sources ""`, so a claude worker loads no user- or project-scope skill
    and no repo `CLAUDE.md` (measured 2026-08-27). The `context-loader` design in
-   `shared-context.md` therefore covers codex, gemini, and antigravity only; for
+   `shared-context.md` therefore covers codex and antigravity only; for
    `oracle`, `librarian`, `frontend-ui-ux-engineer`, and `document-writer` the rules
    have to ride in the prompt, inside the 16,000-character budget above.
 

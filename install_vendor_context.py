@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Install the vendor-side context-loader / decision-record skill payloads.
 
-A vendor CLI (codex, antigravity, gemini) does not inherit the Claude session's
+A vendor CLI (codex, antigravity) does not inherit the Claude session's
 project rules automatically -- it reads them from a `context-loader` skill placed
-in that vendor's own config directory, which reads `.orchestration/` on every task
+in that vendor's own config directory, which reads the community store
+(`.hq/community/`, legacy `.orchestration/`) on every task
 (see `skills/omo/references/shared-context.md`). This script installs that skill
 (and its `decision-record` sibling) from `templates/vendor/<vendor>/` into the
 resolved destination, byte-for-byte -- it never re-types their content.
 
 Destination roots come from `shared-context.md` ("Installing the loader per
-vendor"): codex, gemini, and antigravity each get one project-scope root.
+vendor"): codex and antigravity each get one project-scope root.
 Antigravity's is `.agents/`, per agy's own shipped `agy-customizations` skill
 (`~/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md`), not a
 user-scope copy -- an earlier "unverified" row proposed writing into
@@ -37,7 +38,7 @@ from typing import List, NamedTuple, Optional
 REPO_ROOT = Path(__file__).resolve().parent
 TEMPLATES_VENDOR_DIR = REPO_ROOT / "templates" / "vendor"
 
-ALL_VENDORS = ["codex", "antigravity", "gemini"]
+ALL_VENDORS = ["codex", "antigravity"]
 
 # The binary to probe with `command -v` (shutil.which) per vendor -- informational
 # only, never gates whether a plan is built. antigravity's binary is `agy`, not
@@ -46,7 +47,6 @@ ALL_VENDORS = ["codex", "antigravity", "gemini"]
 VENDOR_BINARY = {
     "codex": "codex",
     "antigravity": "agy",
-    "gemini": "gemini",
 }
 
 
@@ -96,8 +96,6 @@ def resolve_vendor_destinations(vendor: str, project_dir: Path) -> List[Destinat
 
     if vendor == "codex":
         candidates.append(("project", project_dir / ".codex"))
-    elif vendor == "gemini":
-        candidates.append(("project", project_dir / ".gemini"))
     elif vendor == "antigravity":
         candidates.append(("project", project_dir / ".agents"))
     else:
@@ -153,7 +151,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--vendor",
         required=True,
-        choices=["codex", "antigravity", "gemini", "all"],
+        choices=["codex", "antigravity", "all"],
         help="Which vendor to install for, or 'all'.",
     )
     parser.add_argument(

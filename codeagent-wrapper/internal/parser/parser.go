@@ -83,11 +83,9 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 	totalEvents := 0
 
 	var (
-		codexMessage    string
-		claudeMessage   string
-		agyMessage      string
-		geminiBuffer    strings.Builder
-		opencodeMessage strings.Builder
+		codexMessage  string
+		claudeMessage string
+		agyMessage    string
 	)
 
 	for {
@@ -136,18 +134,14 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 		if !isClaude && event.Type == "result" && event.SessionID != "" && event.Status == "" {
 			isClaude = true
 		}
-		isGemini := (event.Type == "init" && event.SessionID != "") || event.Role != "" || event.Delta != nil || event.Status != ""
-		isOpencode := event.OpencodeSessionID != "" && len(event.Part) > 0
-		// agy emits one result object, not a stream. It shares `status` with
-		// the gemini shape but spells the payload `response` and the session
-		// `conversation_id`, so it is detected on those and dispatched ahead
-		// of gemini below — otherwise the gemini branch swallows it and the
-		// call returns an empty message with a zero exit code.
+		// agy emits one result object, not a stream: the payload is
+		// `response` and the session `conversation_id`, and it is detected
+		// on those. (`status` was shared with the retired gemini CLI's
+		// stream shape; that parser branch was deleted in 0.20.0.)
 		isAgy := event.ConversationID != "" ||
 			((event.Status == "SUCCESS" || event.Status == "ERROR") &&
 				(event.Response != "" || event.Error != ""))
 
-		// Handle agy events before gemini (see isAgy above)
 		if isAgy {
 			if event.ConversationID != "" && threadID == "" {
 				threadID = event.ConversationID
@@ -170,36 +164,6 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 			}
 
 			notifyComplete()
-			continue
-		}
-
-		// Handle Opencode events first (most specific detection)
-		if isOpencode {
-			if threadID == "" {
-				threadID = event.OpencodeSessionID
-			}
-
-			var part OpencodePart
-			if err := json.Unmarshal(event.Part, &part); err != nil {
-				warnFn(fmt.Sprintf("Failed to parse opencode part: %s", err.Error()))
-				continue
-			}
-
-			// Extract sessionID from part if available
-			if part.SessionID != "" && threadID == "" {
-				threadID = part.SessionID
-			}
-
-			infoFn(fmt.Sprintf("Parsed Opencode event #%d type=%s part_type=%s", totalEvents, event.Type, part.Type))
-
-			if event.Type == "text" && part.Text != "" {
-				opencodeMessage.WriteString(part.Text)
-				notifyMessage()
-			}
-
-			if part.Type == "step-finish" && part.Reason == "stop" {
-				notifyComplete()
-			}
 			continue
 		}
 
@@ -306,33 +270,6 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 			continue
 		}
 
-		// Handle Gemini events
-		if isGemini {
-			if event.SessionID != "" && threadID == "" {
-				threadID = event.SessionID
-			}
-
-			if event.Content != "" {
-				geminiBuffer.WriteString(event.Content)
-			}
-
-			if event.Status != "" {
-				notifyMessage()
-
-				if event.Type == "result" && (event.Status == "success" || event.Status == "error" || event.Status == "complete" || event.Status == "failed") {
-					notifyComplete()
-				}
-			}
-
-			delta := false
-			if event.Delta != nil {
-				delta = *event.Delta
-			}
-
-			infoFn(fmt.Sprintf("Parsed Gemini event #%d type=%s role=%s delta=%t status=%s content_len=%d", totalEvents, event.Type, event.Role, delta, event.Status, len(event.Content)))
-			continue
-		}
-
 		// Unknown event format from other backends (turn.started/assistant/user); ignore.
 		continue
 	}
@@ -340,10 +277,6 @@ func ParseJSONStreamInternal(r io.Reader, warnFn func(string), infoFn func(strin
 	switch {
 	case agyMessage != "":
 		message = agyMessage
-	case opencodeMessage.Len() > 0:
-		message = opencodeMessage.String()
-	case geminiBuffer.Len() > 0:
-		message = geminiBuffer.String()
 	case claudeMessage != "":
 		message = claudeMessage
 	default:

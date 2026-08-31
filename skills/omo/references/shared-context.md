@@ -74,7 +74,6 @@ A vendor that can rewrite the rules it was given is not constrained by them.
 | Vendor | Files | Source |
 |:---|:---|:---|
 | codex | `.codex/config.toml` with a `[[skills.config]]` block per skill, plus `.codex/skills/{context-loader,decision-record}/` | `templates/vendor/codex/` |
-| gemini | `.gemini/settings.json` with `experimental.skills = true`, plus `.gemini/skills/{context-loader,decision-record}/` | `templates/vendor/gemini/` |
 | antigravity | `.agents/skills/{context-loader,decision-record}/` — **project scope only** | `templates/vendor/antigravity/` |
 | claude | **The session-config loader does not work here.** `backend/claude.go` passes `--setting-sources ""` to break the recursion loop, which also disables every user- and project-scope skill and the repo `CLAUDE.md`. Pass the rules with `--skills` instead | -- |
 

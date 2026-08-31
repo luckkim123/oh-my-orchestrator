@@ -10,10 +10,9 @@ import (
 //
 // omo D24 (2026-08-28) cut it to three. `opencode` went because the operator
 // does not use it; `gemini` was REPLACED by `agy`, not retained alongside it,
-// because the gemini CLI can no longer authenticate here. GeminiBackend and
-// OpencodeBackend still compile — the parser, the stderr filter, and ~80 test
-// lines reference them — but nothing can select them any more, so deleting
-// that code is a separate sweep from this decision.
+// because the gemini CLI can no longer authenticate here. The deferred sweep
+// D24 named happened in 0.20.0: GeminiBackend, OpencodeBackend, their parser
+// branches, stderr patterns, and tests are deleted, not just unreachable.
 var registry = map[string]Backend{
 	"codex":  CodexBackend{},
 	"claude": ClaudeBackend{},

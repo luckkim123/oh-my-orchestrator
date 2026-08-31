@@ -11,7 +11,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Board resolution and the activation gate live in one place; a hook that carried
 # its own copy would drift the moment the gate changed. Missing helper module =>
@@ -24,103 +24,7 @@ except ImportError:
 
 
 MAX_CONSECUTIVE_BLOCKS = 8  # safety valve
-ESCALATE_AFTER_ATTEMPTS = 2  # omo delegation ground 1: two failures, then a different prior
-
-
-def _read_hook_payload() -> dict[str, Any]:
-    raw = sys.stdin.read()
-    if not raw.strip():
-        return {}
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {"_invalid_json": True}
-
-
-def _find_harness_root(payload: dict[str, Any]) -> Optional[Path]:
-    """Locate the root holding .hq/runtime/board.json, .orchestration/board.json,
-    or harness-tasks.json."""
-    if hc is None:
-        return None
-    return hc.find_harness_root(payload)
-
-
-def _load_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"{path.name} must be a JSON object")
-    return data
-
-
-def _tail_text(path: Path, max_bytes: int = 200_000) -> str:
-    with path.open("rb") as f:
-        try:
-            f.seek(0, os.SEEK_END)
-            size = f.tell()
-            f.seek(max(0, size - max_bytes), os.SEEK_SET)
-        except Exception:
-            f.seek(0, os.SEEK_SET)
-        chunk = f.read()
-    return chunk.decode("utf-8", errors="replace")
-
-
-def _priority_rank(v: Any) -> int:
-    return {"P0": 0, "P1": 1, "P2": 2}.get(str(v or ""), 9)
-
-
-def _deps_completed(t: dict[str, Any], completed: set[str]) -> bool:
-    deps = t.get("depends_on") or []
-    if not isinstance(deps, list):
-        return False
-    return all(str(d) in completed for d in deps)
-
-
-def _attempts(t: dict[str, Any]) -> int:
-    try:
-        return int(t.get("attempts") or 0)
-    except Exception:
-        return 0
-
-
-def _logged_failures(progress_tail: str) -> dict[str, int]:
-    """Count ERROR lines per task id in harness-progress.txt.
-
-    `attempts` is written by whoever executed the task, so a session that forgets
-    to bump it silently earns unlimited retries and never trips the escalation
-    below. The progress log is the file's own record of what happened; taking the
-    larger of the two makes the failure count a fact rather than a self-report.
-    """
-    counts: dict[str, int] = {}
-    for line in progress_tail.splitlines():
-        if " ERROR [" not in line:
-            continue
-        head, _, rest = line.partition(" ERROR [")
-        tid, sep, _ = rest.partition("]")
-        if sep and tid:
-            counts[tid.strip()] = counts.get(tid.strip(), 0) + 1
-    return counts
-
-
-def _effective_attempts(t: dict[str, Any], logged: dict[str, int]) -> int:
-    return max(_attempts(t), logged.get(str(t.get("id") or ""), 0))
-
-
-def _max_attempts(t: dict[str, Any]) -> int:
-    try:
-        v = t.get("max_attempts")
-        return int(v) if v is not None else 3
-    except Exception:
-        return 3
-
-
-def _pick_next(pending: list[dict[str, Any]], retry: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
-    def key(t: dict[str, Any]) -> tuple[int, str]:
-        return (_priority_rank(t.get("priority")), str(t.get("id", "")))
-    pending.sort(key=key)
-    retry.sort(key=key)
-    return pending[0] if pending else (retry[0] if retry else None)
+ESCALATE_AFTER_ATTEMPTS = 2  # omo delegation ground 3: two failures, then a different prior
 
 
 def _block_counter_path(root: Path) -> Path:
@@ -243,7 +147,7 @@ def _escalation_notice(task_id: str, tried: int) -> str:
         "Before running it, change one of these and say which:\n"
         "  1. The vendor. Route this task to a different MODEL than the last attempt used "
         "(different backend running the same model family does not count). "
-        "This is omo delegation ground 1.\n"
+        "This is omo delegation ground 3.\n"
         "  2. The approach. State the new hypothesis and how it differs from the two that failed.\n"
         "The retry prompt MUST carry both prior attempts and what you observed, not just the "
         "symptom. A retry without that context repeats the work that produced the failures.\n"
@@ -251,26 +155,15 @@ def _escalation_notice(task_id: str, tried: int) -> str:
     )
 
 
-def _is_harness_active(root: Path) -> bool:
-    """True when hooks are live: board.json.status == "active".
-
-    A closed campaign keeps its board on disk, so presence cannot mean active.
-    Roots that have not migrated still gate on the .harness-active marker.
-    """
-    if hc is None:
-        return False
-    return hc.is_harness_active(root)
-
-
 def main() -> int:
-    payload = _read_hook_payload()
+    payload = hc.read_hook_payload() if hc else {}
 
     # Safety: if stop_hook_active is True, Claude is already continuing
     # from a previous Stop hook block. Check if we should allow stop
     # to prevent infinite loops.
     stop_hook_active = payload.get("stop_hook_active", False)
 
-    root = _find_harness_root(payload)
+    root = hc.find_harness_root(payload) if hc else None
     if root is None:
         return 0  # no harness project, allow stop
 
@@ -283,17 +176,14 @@ def main() -> int:
         return 2
 
     # Guard: only active when harness skill is triggered
-    if not _is_harness_active(root):
+    if not hc.is_harness_active(root):
         return 0
 
-    tasks_path = hc.state_path(root) if hc else (root / "harness-tasks.json")
+    tasks_path = hc.state_path(root)
     progress_path = root / "harness-progress.txt"
     try:
-        state = _load_json(tasks_path)
-        tasks_raw = state.get("tasks") or []
-        if not isinstance(tasks_raw, list):
-            raise ValueError("tasks must be a list")
-        tasks = [t for t in tasks_raw if isinstance(t, dict)]
+        state = hc.load_json(tasks_path)
+        tasks = hc.parse_tasks(state)
     except Exception as e:
         if stop_hook_active:
             sys.stderr.write(
@@ -311,12 +201,8 @@ def main() -> int:
         print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
         return 0
 
-    session_config = state.get("session_config") or {}
-    if not isinstance(session_config, dict):
-        session_config = {}
-
-    concurrency_mode = str(session_config.get("concurrency_mode") or "exclusive")
-    is_concurrent = concurrency_mode == "concurrent"
+    session_config = hc.get_session_config(state)
+    is_concurrent = hc.is_concurrent(session_config)
     worker_id = os.environ.get("HARNESS_WORKER_ID") or None
 
     # Check session limits
@@ -338,7 +224,7 @@ def main() -> int:
     except Exception:
         max_tasks_per_session = 0
     if not is_concurrent and max_tasks_per_session > 0 and session_count > 0 and progress_path.is_file():
-        tail = _tail_text(progress_path)
+        tail = hc.tail_text(progress_path)
         tag = f"[SESSION-{session_count}]"
         finished = 0
         for ln in tail.splitlines():
@@ -351,26 +237,11 @@ def main() -> int:
             return 0  # per-session limit reached, allow stop
 
     # Compute eligible tasks
-    counts: dict[str, int] = {}
-    for t in tasks:
-        s = str(t.get("status") or "pending")
-        counts[s] = counts.get(s, 0) + 1
+    counts = hc.status_counts(tasks)
+    logged_failures = hc.progress_logged_failures(root)
+    completed_count = len(hc.completed_ids(tasks))
 
-    try:
-        logged_failures = _logged_failures(_tail_text(progress_path)) if progress_path.is_file() else {}
-    except Exception:
-        logged_failures = {}
-
-    completed_ids = {str(t.get("id", "")) for t in tasks if str(t.get("status", "")) == "completed"}
-    completed_count = len(completed_ids)
-
-    pending_eligible = [t for t in tasks if str(t.get("status", "")) == "pending" and _deps_completed(t, completed_ids)]
-    retryable = [
-        t for t in tasks
-        if str(t.get("status", "")) == "failed"
-        and _effective_attempts(t, logged_failures) < _max_attempts(t)
-        and _deps_completed(t, completed_ids)
-    ]
+    pending_eligible, retryable = hc.eligible_tasks(tasks, logged_failures)
     in_progress_any = [t for t in tasks if str(t.get("status", "")) == "in_progress"]
     if is_concurrent and worker_id:
         in_progress_blocking = [
@@ -385,7 +256,7 @@ def main() -> int:
     # boards that simply do not use them -- the false-positive class that gets a
     # hook switched off. The seeded board ships both fields, so a campaign has
     # them from the start.
-    on_board = bool(hc) and hc.board_path(root).is_file()
+    on_board = hc.board_path(root).is_file()
     integrity = _integrity_failures(tasks) if on_board else []
     if integrity and not stop_hook_active:
         emit_reason = (
@@ -436,16 +307,16 @@ def main() -> int:
         return 0
 
     # Block the stop — tasks remain
-    next_task = _pick_next(pending_eligible, retryable)
+    next_task = hc.pick_next(pending_eligible, retryable)
     next_hint = ""
     escalation = ""
     if next_task is not None:
         tid = str(next_task.get("id") or "")
         title = str(next_task.get("title") or "").strip()
-        tried = _effective_attempts(next_task, logged_failures)
+        tried = hc.effective_attempts(next_task, logged_failures)
         next_hint = f"next={tid}{(': ' + title) if title else ''}"
         if tried:
-            next_hint += f" attempts={tried}/{_max_attempts(next_task)}"
+            next_hint += f" attempts={tried}/{hc.task_max_attempts(next_task)}"
         if tried >= ESCALATE_AFTER_ATTEMPTS:
             escalation = _escalation_notice(tid, tried)
 

@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+// testNoisePatterns exercises the filtering machinery; the strings are the
+// retired gemini backend's noise list, kept only as fixture data.
+var testNoisePatterns = []string{
+	"[STARTUP]",
+	"Session cleanup disabled",
+	"Warning:",
+	"(node:",
+	"(Use `node --trace-warnings",
+	"Loaded cached credentials",
+	"Loading extension:",
+	"YOLO mode is enabled",
+}
+
 func TestFilteringWriter(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -14,31 +27,31 @@ func TestFilteringWriter(t *testing.T) {
 	}{
 		{
 			name:     "filter STARTUP lines",
-			patterns: geminiNoisePatterns,
+			patterns: testNoisePatterns,
 			input:    "[STARTUP] Recording metric\nHello World\n[STARTUP] Another line\n",
 			want:     "Hello World\n",
 		},
 		{
 			name:     "filter Warning lines",
-			patterns: geminiNoisePatterns,
+			patterns: testNoisePatterns,
 			input:    "Warning: something bad\nActual output\n",
 			want:     "Actual output\n",
 		},
 		{
 			name:     "filter multiple patterns",
-			patterns: geminiNoisePatterns,
+			patterns: testNoisePatterns,
 			input:    "YOLO mode is enabled\nSession cleanup disabled\nReal content\nLoading extension: foo\n",
 			want:     "Real content\n",
 		},
 		{
 			name:     "no filtering needed",
-			patterns: geminiNoisePatterns,
+			patterns: testNoisePatterns,
 			input:    "Line 1\nLine 2\nLine 3\n",
 			want:     "Line 1\nLine 2\nLine 3\n",
 		},
 		{
 			name:     "empty input",
-			patterns: geminiNoisePatterns,
+			patterns: testNoisePatterns,
 			input:    "",
 			want:     "",
 		},
@@ -60,7 +73,7 @@ func TestFilteringWriter(t *testing.T) {
 
 func TestFilteringWriterPartialLines(t *testing.T) {
 	var buf bytes.Buffer
-	fw := newFilteringWriter(&buf, geminiNoisePatterns)
+	fw := newFilteringWriter(&buf, testNoisePatterns)
 
 	// Write partial line
 	_, _ = fw.Write([]byte("Hello "))

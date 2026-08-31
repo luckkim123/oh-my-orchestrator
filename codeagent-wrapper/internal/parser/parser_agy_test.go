@@ -57,22 +57,3 @@ func TestParseAgyNotSwallowedByGeminiBranch(t *testing.T) {
 		t.Fatalf("message = %q, want %q — the gemini branch has taken the agy event", message, "agy spoke")
 	}
 }
-
-// Guard the other direction: a genuine gemini event must not be captured by
-// the agy detection.
-func TestParseGeminiStillRoutesToGeminiBranch(t *testing.T) {
-	input := strings.Join([]string{
-		`{"type":"init","session_id":"sess-1"}`,
-		`{"type":"content","role":"assistant","content":"gemini spoke"}`,
-		`{"type":"result","status":"success"}`,
-	}, "\n") + "\n"
-
-	message, threadID, _ := ParseJSONStreamInternal(strings.NewReader(input), nil, nil, nil, nil)
-
-	if message != "gemini spoke" {
-		t.Errorf("message = %q, want %q", message, "gemini spoke")
-	}
-	if threadID != "sess-1" {
-		t.Errorf("threadID = %q, want %q", threadID, "sess-1")
-	}
-}
