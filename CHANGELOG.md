@@ -32,6 +32,24 @@ none?") had no denominator.
 - `references/vendor-ops.md`: the sample row carries `ground`, and the ledger
   section gains the grounds-and-unstated-share `jq` query the review runs.
 
+### Removed
+
+- `skills/harness/tests/verify_census.py`. It set-compared §9.1's roster against
+  a live `find` for legacy store directories, and the 2026-08-28 stage-3 purge
+  deleted every one of them, so all 24 rows read `STALE` — the subject of the
+  check is gone, not the table. Measured 2026-08-31 before and after that day's
+  §9.2 edit (24 → 25), which places the failure days earlier than the edit.
+  Nothing ran it: the filename is deliberately not `test_*.py` (a machine-specific
+  census would fail the suite on every machine but the one the spec was written
+  on — a correct call), and the P5 dry-run acceptance that two planning prompts
+  said would reuse it was never wired, leaving zero callers in the repo. The
+  script had earned its place — its P0 run caught a mapping table writing
+  `workspace/...` for `~/Desktop/workspace/...` across eight rows, which a
+  row-count check would have passed. It died the way tokensave, CRG, and
+  graphify's MCP server died here: **a layer nothing routes to.** §9 now carries
+  a banner saying not to rebuild it; `census` (roster) and `audit` (git config)
+  are the instruments that answer about the current machine.
+
 ### Notes
 
 - The field crosses six hops (`config.Config` → `runtask.Command` → `Spec` →

@@ -558,6 +558,21 @@ consider the source — which under §7 stays put until `--purge` anyway.
 > per-file *layer* assignments in this section are unaffected — they say which of the
 > four layers a file belongs to, not which anchor owns it.
 
+> **Every legacy store directory named in this table was deleted by the
+> 2026-08-28 stage-3 purge.** So this is a dated record, not a state you can
+> compare against a live filesystem: a `find` for `.omp` / `.omx` /
+> `.orchestration` returns nothing for these rows now, and that is the migration
+> having succeeded rather than the table being wrong.
+> `skills/harness/tests/verify_census.py` performed exactly that set comparison
+> and was retired for it — measured 2026-08-31, all 24 rows read `STALE`, and the
+> count had already been 24 before that day's edits, so it had been
+> FAIL-by-construction since the purge with nobody running it (its filename is
+> deliberately not `test_*.py`, and the P5 acceptance step that was to call it
+> was never wired). **Do not rebuild a verifier against this section.** The two
+> instruments that answer about the *current* machine are
+> `migrate-om-store.sh census` (the roster of anchors) and
+> `migrate-om-store.sh audit` (whether an anchor's git config satisfies §5/§2).
+
 Census command (the fixed one — **unbounded depth**; a `-maxdepth 6` variant missed
 three real anchors at depths 7–8):
 
