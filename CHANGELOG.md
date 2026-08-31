@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.5] - 2026-08-31 — the roster counted another computer's backup
+
+`census` printed `in scope: 8` while this spec's own banner claimed `in scope: 0`
+since the 08-28 purge. The banner was right. All eight rows were Google Drive's
+**other-computers backup** of `workspace`, whose `.omp` (08-20) and `.oms`/`.omd`
+(08-10) are a snapshot from *before* the purge that emptied the live tree — a
+roster a later round would have read as anchors needing migration, on a machine
+that does not own them. Two numbers disagreed for three days and nothing said so.
+
+### Changed
+- §9.2 — eighth exclusion pattern, `*/Library/CloudStorage/*`. A cloud
+  provider's virtual tree is never an anchor this machine owns: it is a mirror
+  of a local path already counted, or a backup of a different computer. Matched
+  on the **provider directory**, not the folder name, which is localized
+  (`다른 컴퓨터` here, `Other computers` elsewhere). Implemented in claudebase
+  `514c7b4`; census now prints `in scope: 0`.
+- §8 — three stale facts in one sentence. `~/Desktop/workspace` → `~/workspace`,
+  iCloud → Google Drive, and **five nested anchors → one anchor, zero legacy
+  stores** (unbounded `find` for `.hq/.anchor` and the six legacy names: one
+  hit, none). The five nested ones survive only in that pre-purge backup.
+  claudebase's `sync-claudebase` §4n-b had kept looping over the Desktop path,
+  where `[ -d "$a" ]` is false — so workspace had **zero `drift` coverage** from
+  the move until that loop was fixed, with no error anywhere.
+
+### Known issue, not fixed here
+`skills/harness/tests/verify_census.py` has been FAIL-by-construction since the
+stage-3 purge: it set-compares §9.1's roster against a live `find` for legacy
+store directories, and the purge deleted every one of them, so all 24 rows read
+STALE. Measured before and after this change (24 → 25; the new glob row is the
+25th). Its premise is gone — §9.1 became a dated record the day the stores did.
+Retire it or repoint it at `.hq/.anchor`; that is a decision, not a patch.
+
 ## [0.21.4] - 2026-08-31 — the vendor's own default is now written down
 
 The evaluation reported the ledger "losing" a role's model on a `--backend`

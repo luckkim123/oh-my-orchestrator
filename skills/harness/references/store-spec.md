@@ -515,8 +515,19 @@ for confirmation regardless.
 
 ## 8. No-git anchors
 
-`~/Desktop/workspace` and its five nested anchors are iCloud-synced and **not a git
-repository**. Every rule in this spec that leans on git is void there:
+`~/workspace` is **not a git repository**, and every rule in this spec that leans on git
+is void there.
+
+> **Corrected 2026-08-31, three ways.** This section read "`~/Desktop/workspace` and its
+> five nested anchors are iCloud-synced" and all three parts were stale. The path moved
+> to `~/workspace` and from iCloud to Google Drive; `claudebase`'s `sync-claudebase`
+> §4n-b kept looping over the Desktop path, where `[ -d "$a" ]` is simply false, so
+> **workspace had zero `drift` coverage from the move until that loop was fixed** — no
+> error anywhere, because a dead path in a guarded loop is indistinguishable from an
+> anchor that passed. And the count is now **one anchor, zero legacy stores** (measured
+> with an unbounded `find` for `.hq/.anchor` and for the six legacy dir names: one hit,
+> none). The five nested anchors still exist — in Google Drive's *other-computers backup*
+> of the pre-purge tree, which is a snapshot this machine must never migrate (§9.2).
 
 | Rule | Git anchor | No-git anchor |
 |:---|:---|:---|
@@ -608,6 +619,7 @@ machine that has not seen the release still refuses.
 | `~/Library/Caches/com.apple.python/**/workspace/.omd` | macOS Python bytecode mirror (`*.pyc` only) |
 | `~/Library/Mobile Documents/.Trash/07_drafts/latex/.oms` | iCloud trash |
 | any store dir inside another store dir (`*/.omp/*`, `*/.oms/*`, `*/.omd/*`, `*/.omx/*`, `*/.omha/*`, `*/.orchestration/*`) | **added P7** — a path within a store, not an anchor. §9.1 row 5's `.omx/.omx` is mapped as a row of row 4's table; listing it separately is a phantom `legacy` anchor no migration can clear |
+| `*/Library/CloudStorage/*` (8 rows / 6 anchors) | **added 2026-08-31** — a cloud provider's virtual tree is never an anchor this machine owns: it is a mirror of a local path already counted, or a backup of a *different* computer. Measured: Google Drive's other-computers area held a `workspace` whose `.omp` (08-20) and `.oms`/`.omd` (08-10) predate the 08-28 stage-3 purge that emptied the live `~/workspace`. Matched on the **provider directory**, not the folder name — that name is localized (`다른 컴퓨터` here, `Other computers` elsewhere) |
 
 The two `plugins/cache/**/.omha` entries and the `com.apple.python` mirror were **not in
 the plan's exclusion list** — they surfaced only when the census was re-run at unbounded
@@ -618,14 +630,23 @@ holds one `.omha` per *installed version*, so it grew from 2 to 5 across the P2,
 P4 deployments, and the whole-census total went 29 -> 32 without a single anchor
 changing. `~/.Trash` gains one on any purge. Read a census against the exclusion globs
 (`*/.claude/plugins/*`, `*/Library/Caches/com.apple.python/*`, `*/.Trash/*`,
-`*/.phase0-scratch/*`, `*/.hq/*`, and the nested-store globs above), never against a
-remembered number —
+`*/.phase0-scratch/*`, `*/.hq/*`, `*/Library/CloudStorage/*`, and the nested-store globs
+above), never against a remembered number —
 `migrate-om-store.sh census` is written that way for this reason. Measured 2026-08-28 on
 `ksm-mac` **after P7**: 33 hits, 13 excluded, **20 in scope**. The exclusion list grew a
 seventh pattern that round — a store directory nested *inside* another legacy store is a
 path within that store, not an anchor (§9.1 row 5's `.omx/.omx`, mapped as a row of row
 4's table). Before that rule census reported 21 in scope, and the extra row was a phantom
 `legacy` anchor no migration could ever clear.
+
+**Measured again 2026-08-31 on `ksm-mac`: 27 hits, 27 excluded, `in scope: 0`** — which is
+what the banner at the top of this spec has claimed since the stage-3 purge, and it was
+*not* what the tool printed. Census reported **8 in scope** until the CloudStorage row
+above was added, and every one of those 8 was Google Drive's backup of another computer.
+That is the eighth pattern, and it arrived the same way the seventh did: a roster nobody
+re-read against its own claimed total. The two numbers disagreed for three days and
+nothing anywhere said so — check the printed `in scope` against this spec's banner, not
+against memory.
 
 **Verified: `omha` does not read either cache.** `route_log.py:10` documents opt-in "by
 directory: writes only when `.omha/` already exists in the session's cwd", and
