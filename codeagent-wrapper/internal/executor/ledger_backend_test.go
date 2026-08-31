@@ -158,3 +158,55 @@ func rawLedgerLine(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+// A `--backend` override drops the role's model on purpose (a model name lives
+// in its own vendor's namespace), so `model` is empty and the row would name
+// only the vendor -- which is how 2026-08-31's two most expensive calls became
+// unattributable. `model_default` carries what that vendor's config declares,
+// and only then: a call that passed a model already holds the stronger fact and
+// must not get a weaker one sitting beside it.
+func TestLedgerRecordsTheVendorDefaultOnlyWhenNoModelWasPassed(t *testing.T) {
+	restoreDefault := vendorDefaultModel
+	vendorDefaultModel = func(name string) string { return "declared-" + name }
+	t.Cleanup(func() { vendorDefaultModel = restoreDefault })
+
+	restore := newCommandRunner
+	newCommandRunner = func(context.Context, string, ...string) commandRunner { return &fakeCmd{} }
+	t.Cleanup(func() { newCommandRunner = restore })
+
+	noArgs := func(*config.Config, string) []string { return nil }
+
+	t.Run("no model passed", func(t *testing.T) {
+		ledgerPath := filepath.Join(t.TempDir(), "calls.jsonl")
+		t.Setenv("CODEAGENT_LEDGER", ledgerPath)
+		RunCodexTaskWithContext(
+			context.Background(),
+			TaskSpec{ID: "t1", Agent: "oracle", Task: "review the diff", Mode: "new"},
+			nil, "codex", noArgs, nil, false, true, 0,
+		)
+		row := readSoleLedgerRow(t, rawLedgerLine(t, ledgerPath))
+		if got := row["model_default"]; got != "declared-codex" {
+			t.Fatalf("model_default = %v, want declared-codex", got)
+		}
+		if _, present := row["model"]; present {
+			t.Fatalf("model present in %v, want it omitted when none was passed", row)
+		}
+	})
+
+	t.Run("model passed", func(t *testing.T) {
+		ledgerPath := filepath.Join(t.TempDir(), "calls.jsonl")
+		t.Setenv("CODEAGENT_LEDGER", ledgerPath)
+		RunCodexTaskWithContext(
+			context.Background(),
+			TaskSpec{ID: "t2", Agent: "explore", Task: "sweep the tree", Mode: "new", Model: "gpt-5.6-terra"},
+			nil, "codex", noArgs, nil, false, true, 0,
+		)
+		row := readSoleLedgerRow(t, rawLedgerLine(t, ledgerPath))
+		if got := row["model"]; got != "gpt-5.6-terra" {
+			t.Fatalf("model = %v, want gpt-5.6-terra", got)
+		}
+		if _, present := row["model_default"]; present {
+			t.Fatalf("model_default present in %v, want it omitted when a model was passed", row)
+		}
+	})
+}

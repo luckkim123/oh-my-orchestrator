@@ -27,6 +27,12 @@ import (
 )
 
 const forceKillWaitTimeout = 5 * time.Second
+
+// vendorDefaultModel is bound at package scope because RunCodexTaskWithContext
+// takes a parameter named `backend`, which shadows the package of the same
+// name for the whole function body. Also the seam tests use.
+var vendorDefaultModel = backend.DefaultModel
+
 const defaultProgressHeartbeatInterval = 15 * time.Second
 
 // Defaults duplicated from wrapper for module decoupling.
@@ -934,6 +940,12 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		}
 		if cfg != nil {
 			call.Model = cfg.Model
+			// No model was passed, so the vendor picked its own and the row
+			// would otherwise say only which vendor. Read what its config
+			// declares; it is the weaker fact, so it lands in its own field.
+			if strings.TrimSpace(cfg.Model) == "" {
+				call.ModelDefault = vendorDefaultModel(backendName)
+			}
 			call.Effort = cfg.ReasoningEffort
 			call.Mode = cfg.Mode
 			call.WorkDir = cfg.WorkDir

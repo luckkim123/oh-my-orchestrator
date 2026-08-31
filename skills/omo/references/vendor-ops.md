@@ -85,7 +85,21 @@ missing `cost_usd` as a free call.
 `model` is what the role was configured with; `model_resolved` is what actually
 served the turn, and they differ often enough to matter -- a claude turn also
 bills a cheap helper model alongside the one that answered, so the ledger
-records the model that carried the cost. `cached_write` is input written *into*
+records the model that carried the cost.
+
+`model_default` is the third of the family and the weakest: what the vendor's
+own config file *declares* it falls back to, written only when `model` is empty.
+That is not a rare state -- a `--backend` override with no `--model` drops the
+role's model on purpose, because a model name lives in its vendor's namespace
+and carrying it across is an HTTP 400 on codex and a silent wrong-model run on
+agy. Before 0.21.3 those rows said `backend: codex` and nothing more, which is
+how 2026-08-31's two most expensive calls (4.8M and 8.9M input tokens, 766s and
+1462s) became unattributable to any model. Read at record time from
+`~/.codex/config.toml` and `~/.gemini/antigravity-cli/settings.json` -- measured
+on this machine, `gpt-5.6-sol` and `Gemini 3.7 Flash (High)`, neither of which is
+the `gpt-5.6-terra` that `models.json` binds the codex roles to. It is a declared
+default, never evidence that this model served the turn; only `model_resolved`
+claims that, and only claude fills it. `cached_write` is input written *into*
 a cache: claude bills it as fresh input and it dwarfs `in` on a cold call
 (60,680 against an `in` of 2, measured), so leaving it out understates claude by
 orders of magnitude.

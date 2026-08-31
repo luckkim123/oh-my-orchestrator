@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.4] - 2026-08-31 — the vendor's own default is now written down
+
+The evaluation reported the ledger "losing" a role's model on a `--backend`
+override. It does not: `internal/adapter/cli/parse.go` clears the model there on
+purpose, because a model name lives in its own vendor's namespace and carrying
+`claude-opus-5` onto codex is an HTTP 400 (and onto agy, a silent wrong-model
+run). `model: None` was a true record of "nothing was configured".
+
+The real gap sat one step further out. Nothing recorded what the vendor then
+picked for itself, so 2026-08-31's two most expensive calls — 4.8M and 8.9M input
+tokens, 766s and 1462s — carried `backend: codex` and no model at all. Measured
+here, that was `gpt-5.6-sol`, not the `gpt-5.6-terra` that `models.json` binds
+the codex roles to; agy's is `Gemini 3.7 Flash (High)`. Both sit in the vendors'
+own config files, so no output parsing is involved.
+
+### Added
+- `internal/backend/defaultmodel.go` `DefaultModel(backend)` — reads the declared
+  fallback from `~/.codex/config.toml` and
+  `~/.gemini/antigravity-cli/settings.json`. The codex reader matches on the `=`
+  rather than the key name (`model_reasoning_effort` shares the prefix) and stops
+  at the first `[table]` header (a model inside a profile is not the default).
+  Every failure returns empty: this runs inside a deferred ledger write and must
+  never affect the call it describes.
+- Ledger field `model_default`, written only when `model` is empty. It is the
+  weakest of the three model fields and gets its own name for that reason:
+  `model` is what was configured, `model_resolved` is what served the turn (claude
+  only), `model_default` is what the vendor's config says it reaches for.
+
+### Changed
+- `skills/omo/references/vendor-ops.md` — the ledger schema section documents the
+  third field and why an override leaves `model` empty.
+
+### Verification
+Full Go suite green. New: 8 cases in `internal/backend` (the
+`model_reasoning_effort` prefix trap, a table-scoped model, an inline comment, a
+commented-out key, absent config, claude-always-empty) and a two-branch executor
+test asserting `model_default` appears when no model was passed and is *absent*
+when one was. Probed against this machine's real config files: `gpt-5.6-sol` /
+`Gemini 3.7 Flash (High)` / empty for claude. Live end-to-end, one real
+`--agent oracle --backend codex` call: the row carries
+`"model_default":"gpt-5.6-sol"`. The first live run recorded nothing — the
+installed binary was still 0.21.3, which is the `make install` step this repo's
+own SKILL.md warns about.
+
 ## [0.21.3] - 2026-08-31 — the pipe nobody closes now has a deadline
 
 A background launcher hands the wrapper a stdin that is not a tty, is never

@@ -40,17 +40,24 @@ type Call struct {
 	Role      string
 	Backend   string
 	Model     string
-	Effort    string
-	Mode      string
-	WorkDir   string
-	Exit      int
-	OK        bool
-	TaskChars int
-	MsgChars  int
-	Tokens    *Tokens
-	Log       string
-	PID       int
-	Err       string
+	// ModelDefault is what the vendor's own config declares it falls back
+	// to, filled only when Model is empty -- which is every `--backend`
+	// override without an explicit `--model`. Declared, not observed: it
+	// says which model the vendor was configured to reach for, never that
+	// this model served the turn. ModelResolved below is that claim, and
+	// only claude makes it.
+	ModelDefault string
+	Effort       string
+	Mode         string
+	WorkDir      string
+	Exit         int
+	OK           bool
+	TaskChars    int
+	MsgChars     int
+	Tokens       *Tokens
+	Log          string
+	PID          int
+	Err          string
 
 	// CostUSD and ModelResolved come from the backend, and today only claude
 	// reports either. Model above is what the role was *configured* with;
@@ -72,6 +79,7 @@ type entry struct {
 	Role          string   `json:"role,omitempty"`
 	Backend       string   `json:"backend"`
 	Model         string   `json:"model,omitempty"`
+	ModelDefault  string   `json:"model_default,omitempty"`
 	ModelResolved string   `json:"model_resolved,omitempty"`
 	Effort        string   `json:"effort,omitempty"`
 	Mode          string   `json:"mode,omitempty"`
@@ -197,6 +205,7 @@ func marshalLine(call Call) ([]byte, error) {
 		Role:          call.Role,
 		Backend:       call.Backend,
 		Model:         call.Model,
+		ModelDefault:  call.ModelDefault,
 		ModelResolved: call.ModelResolved,
 		Effort:        call.Effort,
 		Mode:          call.Mode,
