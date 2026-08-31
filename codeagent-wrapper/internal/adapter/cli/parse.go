@@ -181,6 +181,19 @@ func BuildSingleConfig(cmd *cobra.Command, args []string, rawArgv []string, opts
 		reasoningEffort = strings.TrimSpace(resolvedReasoning)
 	}
 
+	// Validated here rather than accepted as free text: an unchecked field is
+	// a denominator nobody can trust, and parse time is before any vendor
+	// process starts, so a typo costs nothing.
+	ground := strings.TrimSpace(opts.Ground)
+	if ground != "" {
+		switch ground {
+		case "1", "2", "3", "4":
+		default:
+			return nil, fmt.Errorf("--ground %s: must be 1 (settled plan), 2 (volume), "+
+				"3 (three-strike) or 4 (adversarial verification)", ground)
+		}
+	}
+
 	skipChanged := cmd.Flags().Changed("skip-permissions") || cmd.Flags().Changed("dangerously-skip-permissions")
 	skipPermissions := false
 	if skipChanged {
@@ -215,6 +228,7 @@ func BuildSingleConfig(cmd *cobra.Command, args []string, rawArgv []string, opts
 		YoloSet:            yoloSet,
 		Model:              model,
 		ReasoningEffort:    reasoningEffort,
+		Ground:             ground,
 		MaxParallelWorkers: config.ResolveMaxParallelWorkers(),
 		AllowedTools:       resolvedAllowedTools,
 		DisallowedTools:    resolvedDisallowedTools,

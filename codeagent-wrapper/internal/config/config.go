@@ -9,13 +9,19 @@ import (
 
 // Config holds CLI configuration.
 type Config struct {
-	Mode               string // "new" or "resume"
-	Task               string
-	SessionID          string
-	WorkDir            string
-	OutputPath         string
-	Model              string
-	ReasoningEffort    string
+	Mode            string // "new" or "resume"
+	Task            string
+	SessionID       string
+	WorkDir         string
+	OutputPath      string
+	Model           string
+	ReasoningEffort string
+	// Ground is which of omo's four delegation grounds the caller named.
+	// SKILL.md already forbids delegating without naming one, but that
+	// obligation lived only in the prompt prose, so the ledger could count
+	// what a call cost and never why it was made. One of "1".."4", or
+	// empty when the caller did not say.
+	Ground             string
 	ExplicitStdin      bool
 	Backend            string
 	Agent              string

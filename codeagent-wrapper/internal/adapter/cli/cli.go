@@ -20,6 +20,7 @@ type Options struct {
 	Backend         string
 	Model           string
 	ReasoningEffort string
+	Ground          string
 	Agent           string
 	PromptFile      string
 	Output          string
@@ -100,6 +101,7 @@ func AddRootFlags(fs *pflag.FlagSet, opts *Options) {
 	fs.StringVar(&opts.Model, "model", "", "Model override")
 	fs.StringVar(&opts.ReasoningEffort, "reasoning-effort", "", "Reasoning effort (backend-specific)")
 	fs.StringVar(&opts.Agent, "agent", "", "Agent preset name (from ~/.codeagent/models.json)")
+	fs.StringVar(&opts.Ground, "ground", "", "Delegation ground: 1 settled plan | 2 volume | 3 three-strike | 4 adversarial verification")
 	fs.StringVar(&opts.PromptFile, "prompt-file", "", "Prompt file path")
 	fs.StringVar(&opts.Output, "output", "", "Write structured JSON output to file")
 	fs.StringVar(&opts.Skills, "skills", "", "Comma-separated skill names for spec injection")

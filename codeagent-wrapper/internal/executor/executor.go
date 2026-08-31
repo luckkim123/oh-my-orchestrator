@@ -947,6 +947,7 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 				call.ModelDefault = vendorDefaultModel(backendName)
 			}
 			call.Effort = cfg.ReasoningEffort
+			call.Ground = cfg.Ground
 			call.Mode = cfg.Mode
 			call.WorkDir = cfg.WorkDir
 		}
@@ -982,6 +983,7 @@ func RunCodexTaskWithContext(parentCtx context.Context, taskSpec TaskSpec, backe
 		WorkDir:         taskSpec.WorkDir,
 		Model:           taskSpec.Model,
 		ReasoningEffort: taskSpec.ReasoningEffort,
+		Ground:          taskSpec.Ground,
 		SkipPermissions: taskSpec.SkipPermissions,
 		Yolo:            taskSpec.Yolo,
 		YoloSet:         taskSpec.YoloSet,

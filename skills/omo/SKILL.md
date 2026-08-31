@@ -26,7 +26,7 @@ made**: undecided work stays, decided work goes.
 - **Claude owns the decision and the verdict.** What to build, whether it is right,
   whether the evidence supports the claim — never delegated, never rubber-stamped.
 - **Delegate the volume, on a named ground.** When you delegate, name the ground in
-  the same breath.
+  the same breath — and pass `--ground <1-4>` so the ledger records it.
 - **What comes back is a draft, not a result.** You read it against the repo before it
   counts. A vendor that executed a wrong plan does so confidently.
 - **Always pass context forward** — the original user request plus any relevant prior
@@ -372,7 +372,10 @@ Right:
 
 ## Forbidden Behaviors
 
-- **FORBIDDEN** to delegate without naming which of the four grounds holds.
+- **FORBIDDEN** to delegate without naming which of the four grounds holds — in the
+  Context Pack *and* as `--ground <1-4>` on the call. The prose tells the vendor; the
+  flag is what the ledger can count, and a ground stated only in prose is a ground no
+  weekly review can see.
 - **FORBIDDEN** to invoke a role without the original request and a complete
   Context Pack.
 - **FORBIDDEN** to approve your own work. The reviewing pass and the authoring pass

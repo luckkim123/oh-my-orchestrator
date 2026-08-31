@@ -11,6 +11,7 @@ func PrepareConfigPlan(cfg *config.Config, deps PrepareDeps) (Plan, error) {
 		Backend:            cfg.Backend,
 		Model:              cfg.Model,
 		ReasoningEffort:    cfg.ReasoningEffort,
+		Ground:             cfg.Ground,
 		Agent:              cfg.Agent,
 		SkipPermissions:    cfg.SkipPermissions,
 		Yolo:               cfg.Yolo,

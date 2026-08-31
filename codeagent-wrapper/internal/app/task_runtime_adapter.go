@@ -106,6 +106,7 @@ func buildSingleTaskCommandArgs(cmd runtask.Command, targetArg string) []string 
 		Backend:         cmd.Backend,
 		Model:           cmd.Model,
 		ReasoningEffort: cmd.ReasoningEffort,
+		Ground:          cmd.Ground,
 		SkipPermissions: cmd.SkipPermissions,
 		Yolo:            cmd.Yolo,
 		YoloSet:         cmd.YoloSet,

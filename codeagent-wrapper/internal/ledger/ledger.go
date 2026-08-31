@@ -48,16 +48,21 @@ type Call struct {
 	// only claude makes it.
 	ModelDefault string
 	Effort       string
-	Mode         string
-	WorkDir      string
-	Exit         int
-	OK           bool
-	TaskChars    int
-	MsgChars     int
-	Tokens       *Tokens
-	Log          string
-	PID          int
-	Err          string
+	// Ground is which of omo's four delegation grounds the caller named --
+	// "1".."4", empty when unstated. Declared by the caller, never inferred:
+	// an empty ground means the obligation was skipped, which is itself the
+	// number a routing review wants.
+	Ground    string
+	Mode      string
+	WorkDir   string
+	Exit      int
+	OK        bool
+	TaskChars int
+	MsgChars  int
+	Tokens    *Tokens
+	Log       string
+	PID       int
+	Err       string
 
 	// CostUSD and ModelResolved come from the backend, and today only claude
 	// reports either. Model above is what the role was *configured* with;
@@ -82,6 +87,7 @@ type entry struct {
 	ModelDefault  string   `json:"model_default,omitempty"`
 	ModelResolved string   `json:"model_resolved,omitempty"`
 	Effort        string   `json:"effort,omitempty"`
+	Ground        string   `json:"ground,omitempty"`
 	Mode          string   `json:"mode,omitempty"`
 	WorkDir       string   `json:"workdir,omitempty"`
 	Exit          int      `json:"exit"`
@@ -206,6 +212,7 @@ func marshalLine(call Call) ([]byte, error) {
 		Backend:       call.Backend,
 		Model:         call.Model,
 		ModelDefault:  call.ModelDefault,
+		Ground:        call.Ground,
 		ModelResolved: call.ModelResolved,
 		Effort:        call.Effort,
 		Mode:          call.Mode,

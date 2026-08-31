@@ -71,7 +71,7 @@ One row, measured:
 ```json
 {"ts":"2026-08-31T03:31:12.4+09:00","dur_ms":4799,"role":"librarian",
  "backend":"claude","model":"claude-sonnet-5","model_resolved":"claude-sonnet-5",
- "effort":"medium","mode":"new","workdir":"/tmp","exit":0,"ok":true,
+ "effort":"medium","ground":"2","mode":"new","workdir":"/tmp","exit":0,"ok":true,
  "task_chars":32,"msg_chars":2,
  "tokens":{"in":2,"cached_in":30158,"cached_write":3574,"out":4},
  "cost_usd":0.0213176,"log":"/var/.../codeagent-wrapper-55564.log","pid":55564}
@@ -86,6 +86,15 @@ missing `cost_usd` as a free call.
 served the turn, and they differ often enough to matter -- a claude turn also
 bills a cheap helper model alongside the one that answered, so the ledger
 records the model that carried the cost.
+
+`ground` is the one field the vendor never supplies -- it is the caller's own
+declaration of which of the four delegation grounds held, passed as
+`--ground <1-4>` and validated at parse time so a typo cannot enter the
+denominator. SKILL.md has forbidden delegating without naming a ground since
+0.1, but until 0.21.5 that obligation lived only in the prompt prose, so the
+ledger could say what a call cost and never why it was made. **An empty
+`ground` is a measurement, not a gap**: it counts a delegation made without the
+obligation met, which is exactly what a routing review is looking for.
 
 `model_default` is the third of the family and the weakest: what the vendor's
 own config file *declares* it falls back to, written only when `model` is empty.
@@ -112,6 +121,9 @@ jq -s 'group_by(.role)[] | {role: .[0].role, calls: length,
        cost: (map(.cost_usd // 0) | add), secs: (map(.dur_ms) | add / 1000)}' "$L"
 jq -s 'group_by(.backend)[] | {backend: .[0].backend, calls: length,
        failed: (map(select(.ok == false)) | length)}' "$L"
+# grounds, and the un-grounded share -- the routing question, not the cost one
+jq -s 'group_by(.ground // "")[] | {ground: (.[0].ground // "(unstated)"),
+       calls: length, secs: (map(.dur_ms) | add / 1000)}' "$L"
 ```
 
 Three boundaries, so an empty answer is not mistaken for a zero:

@@ -26,6 +26,7 @@ type Command struct {
 	Backend            string
 	Model              string
 	ReasoningEffort    string
+	Ground             string
 	Agent              string
 	SkipPermissions    bool
 	Yolo               bool
@@ -77,6 +78,7 @@ func PreparePlan(cmd Command, deps PrepareDeps) (Plan, error) {
 		Backend:         cmd.Backend,
 		Model:           cmd.Model,
 		ReasoningEffort: cmd.ReasoningEffort,
+		Ground:          cmd.Ground,
 		Agent:           cmd.Agent,
 		SkipPermissions: cmd.SkipPermissions,
 		Yolo:            cmd.Yolo,

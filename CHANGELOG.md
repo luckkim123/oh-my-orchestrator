@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.6] - 2026-08-31 — the ledger knew the cost and never the reason
+
+`SKILL.md:375` has forbidden delegating without naming one of four grounds since
+0.1. The ledger, added 08-31, records what every vendor call cost — backend,
+model, effort, tokens, duration, exit — and could not say **why any of them was
+made**, because the obligation was discharged in prompt prose that nothing
+machine-readable ever saw. Nine rows in, the first question a weekly routing
+review would ask ("which grounds do we actually delegate on, and how often on
+none?") had no denominator.
+
+### Added
+
+- `--ground <1-4>` on the wrapper, recorded as `"ground"` in
+  `calls.jsonl`. Validated at parse time against the four grounds rather than
+  carried as free text: an unchecked field is a denominator nobody can trust,
+  and parse time is before any vendor process starts, so a typo costs a message
+  instead of a call. An absent `ground` is a measurement, not a gap — it counts
+  a delegation made without the obligation met.
+- `TestGroundFlag` pins the six cases through `BuildSingleConfig`; the
+  out-of-range and prose cases fail when the validation is widened, checked.
+
+### Changed
+
+- `skills/omo/SKILL.md`: both statements of the ground obligation now require the
+  flag alongside the prose. A ground stated only in prose is one no review can
+  see, which is how tokensave, CRG, and graphify's MCP server each died here —
+  a layer nothing routes to.
+- `references/vendor-ops.md`: the sample row carries `ground`, and the ledger
+  section gains the grounds-and-unstated-share `jq` query the review runs.
+
+### Notes
+
+- The field crosses six hops (`config.Config` → `runtask.Command` → `Spec` →
+  `TaskSpec` → the executor's own `Config` → `ledger.Call`). The first attempt
+  patched only the ends, built clean, passed the parse tests, and wrote a live
+  row with no `ground` in it — `internal/executor/executor.go:979` rebuilds
+  `cfg` from `taskSpec` and drops anything the spec does not carry. Verified
+  end-to-end against a real codex call, not by unit test alone.
+
 ## [0.21.5] - 2026-08-31 — the roster counted another computer's backup
 
 `census` printed `in scope: 8` while this spec's own banner claimed `in scope: 0`

@@ -14,6 +14,7 @@ type Spec struct {
 	Backend         string
 	Model           string
 	ReasoningEffort string
+	Ground          string
 	Agent           string
 	PromptFile      string
 	SkipPermissions bool

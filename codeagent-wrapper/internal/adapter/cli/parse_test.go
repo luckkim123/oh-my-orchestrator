@@ -66,3 +66,51 @@ func TestBackendOverrideRejectsSameFamilyModel(t *testing.T) {
 		})
 	}
 }
+
+// TestGroundFlag pins the delegation ground through parsing. SKILL.md:375 has
+// forbidden delegating without naming one of four grounds since 0.1, but the
+// obligation lived only in the prompt prose -- the ledger could say what a call
+// cost and never why it was made. The value is validated here rather than
+// carried as free text: an unchecked field is a denominator nobody can trust,
+// and parse time is before any vendor process starts.
+func TestGroundFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		argv    []string
+		want    string
+		wantErr bool
+	}{
+		{"unstated stays empty", []string{"-", "."}, "", false},
+		{"ground 1", []string{"--ground", "1", "-", "."}, "1", false},
+		{"ground 4", []string{"--ground", "4", "-", "."}, "4", false},
+		{"whitespace trimmed", []string{"--ground", " 2 ", "-", "."}, "2", false},
+		{"out of range", []string{"--ground", "5", "-", "."}, "", true},
+		{"prose is not a ground", []string{"--ground", "volume", "-", "."}, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := &Options{}
+			cmd := &cobra.Command{SilenceErrors: true, SilenceUsage: true, Args: cobra.ArbitraryArgs}
+			AddRootFlags(cmd.Flags(), opts)
+			if err := cmd.ParseFlags(tc.argv); err != nil {
+				t.Fatalf("ParseFlags() error = %v", err)
+			}
+			args := cmd.Flags().Args()
+			cfg, err := BuildSingleConfig(cmd, args, args, opts, viper.New())
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got cfg.Ground = %q", cfg.Ground)
+				}
+				if !strings.Contains(err.Error(), "--ground") {
+					t.Fatalf("error should name the flag: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("BuildSingleConfig() error = %v", err)
+			}
+			if cfg.Ground != tc.want {
+				t.Fatalf("cfg.Ground = %q, want %q", cfg.Ground, tc.want)
+			}
+		})
+	}
+}
