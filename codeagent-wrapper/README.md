@@ -40,9 +40,20 @@ Requires: Go 1.21+.
 # Build from source
 make build
 
-# Or install to $GOPATH/bin
+# Or install to $GOBIN (default ~/go/bin)
 make install
 ```
+
+`$GOBIN` is usually **not** on `PATH`, and omo invokes this binary by name. Link it
+from a `PATH` directory rather than copying it there, so the next `make install`
+is live with no second step:
+
+```bash
+ln -sf "$(go env GOPATH)/bin/codeagent-wrapper" ~/.local/bin/codeagent-wrapper
+```
+
+A copy leaves a stale binary answering to the name after the next build, and
+`command -v codeagent-wrapper` passes on it.
 
 Verify installation:
 
@@ -256,7 +267,7 @@ make build    # Build binary
 make test     # Run tests
 make lint     # golangci-lint + staticcheck
 make clean    # Clean build artifacts
-make install  # Install to $GOPATH/bin
+make install  # Install to $GOBIN (default ~/go/bin)
 ```
 
 CI uses GitHub Actions with Go 1.21 / 1.22 matrix testing.

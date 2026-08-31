@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.1] - 2026-08-31 — the release that did not ship, and the check that let it not ship
+
+0.19.0 wrote its CHANGELOG, its skill text and its tag, and left
+`.claude-plugin/plugin.json` at `0.18.0`. The marketplace entry carries no pinned
+version, so the plugin's own manifest is what `/plugin update` resolves against:
+the ledger, the ground-4 gate and the vendor-ops section were all pushed and none
+of them could be pulled. This entry is the first version that actually carries
+them.
+
+The same shape, one layer down, is why the ledger recorded nothing for the seven
+hours after it shipped. `make install` puts the binary in `$GOBIN`, which is not on
+`PATH` on this machine; `PATH` resolved to a hand-copied build from two days
+earlier, and omo's pre-flight check — `command -v codeagent-wrapper` — passed on
+it, because presence is not currency. Both failures are a version-bearing layer
+that the thing above it never reads.
+
+### Changed
+- **`skills/omo/SKILL.md`, pre-flight step 1** now says that `command -v` cannot
+  distinguish a current wrapper from a stale one, and gives the comparison that
+  can (`--version` against the top of `CHANGELOG.md`) plus the symlink that stops
+  the drift recurring.
+- **`codeagent-wrapper/README.md`** names `$GOBIN` rather than `$GOPATH/bin` and
+  tells the reader to link from a `PATH` directory instead of copying. The copy is
+  what put a two-day-old binary on `PATH` here.
+
+### Fixed
+- `.claude-plugin/plugin.json` version, `0.18.0` → `0.19.1`. Nothing from 0.19.0
+  was reachable by a consumer until this line moved.
+
+### Verification
+- `codeagent-wrapper --version` through `PATH` → `v0.19.0` after the symlink
+  replaced the copy (it read `v0.8.1-8-gd45fc34-dirty` before).
+- One `--agent explore` call through `PATH` grew
+  `~/.local/state/codeagent-wrapper/calls.jsonl` from 3 rows to 4, with
+  `backend=codex role=explore in=32242 cached_in=26112 out=146` — the ledger is
+  live for anything invoking the wrapper by name, which it was not before.
+- `python3 -c "import json; json.load(open('.claude-plugin/plugin.json'))"` parses,
+  and the diff on that file is one line.
+
+### Notes
+- The old `PATH` binary was moved to `codeagent-wrapper.pre-0.19.0.bak` rather
+  than overwritten; it was built from a dirty tree and is not reproducible from a
+  commit.
+- This repo carries three version fields on three different lineages —
+  `.claude-plugin/plugin.json` (`0.x`, the one delivery resolves against),
+  `package.json` (`6.7.0`), and `skills/omo/.claude-plugin/plugin.json` (`5.6.1`) —
+  alongside tags in both a `v0.x` and a `v6.x` series. Only the first was moved
+  here. Reconciling them is its own change and is not attempted in a patch.
+
 ## [0.19.0] - 2026-08-31 — the wrapper starts measuring what its roles cost
 
 The binding question — which role should run on which vendor — has been parked

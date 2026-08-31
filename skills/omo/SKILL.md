@@ -179,6 +179,18 @@ So before the first vendor call in a session:
    published artifact, and a machine that never ran `make build` has no vendor lane
    at all. Checking only the backends passes a machine whose backends are perfect
    and whose entry point does not exist.
+
+   **Existing is not current, and `command -v` cannot tell you which.**
+   `make install` writes to `$GOBIN` (default `~/go/bin`), a directory frequently
+   absent from `PATH`, so the binary answering to the name can be an older build
+   that every existence check reports as perfectly present. Compare
+   `codeagent-wrapper --version` against the version at the top of this repo's
+   `CHANGELOG.md`; when they differ the wrapper is running code from before
+   whatever fix you are relying on. Measured twice here, and the second time the
+   call ledger shipped the day before recorded nothing at all through `PATH` while
+   the check passed. The durable fix is a symlink from a `PATH` directory to
+   `$GOBIN/codeagent-wrapper` rather than a copy, so the next `make install` is
+   live with no second step.
 2. **Check the role's backend is on PATH** (`command -v codex`, `command -v claude`).
    A missing CLI is not an error to work around silently -- the call will fail with
    an exec error that reads like a bug in the wrapper.
