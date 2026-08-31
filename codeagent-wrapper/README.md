@@ -24,13 +24,13 @@ Entry point: `cmd/codeagent-wrapper/main.go` (binary: `codeagent-wrapper`).
 
 ## Installation
 
-### Recommended (interactive installer)
+### Recommended
 
 ```bash
-npx github:stellarlinkco/myclaude
+make build && make install   # from codeagent-wrapper/ (installs to $GOBIN)
 ```
 
-Select the `codeagent-wrapper` module to install.
+The npx installer was removed in 0.21.0; the wrapper ships as Go source only.
 
 ### Manual build
 

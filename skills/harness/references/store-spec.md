@@ -342,7 +342,12 @@ nest, and a repo-root-relative rule misses the nested ones:
 ```
 **/.hq/work/
 **/.hq/runtime/
+**/.harness.lock/
 ```
+
+(The third line is new with the 2026-08-31 root-local lock move: the state lock
+now lives in the root itself, so a session that dies holding it leaves an empty
+lockdir that would otherwise sit in `git status` until the next acquire reaps it.)
 
 **The per-harness legacy ignore lines are removed, as of this round (§9.4).** `oms`
 dropped `.oms/`, `omd` dropped `.omd/`, `omha` dropped `.omha/redact-patterns.txt`, `omx`
@@ -372,12 +377,22 @@ The gate is the pair (legacy `.om?` store, `.hq/.anchor`), never a single marker
 | Legacy `.om?` store | `.hq/.anchor` | Behavior |
 |:---|:---|:---|
 | absent | absent | feature **off, exit 0** — a repo that does not use this harness |
-| **present** | absent | **warn — unmigrated legacy store, reads will not find it** (§7 stage 2: no fallback) |
+| **present**, board parses or absent | absent | **warn — unmigrated legacy store, reads will not find it** (§7 stage 2: no fallback) |
+| **present**, board **unparseable** | absent | **loud failure, exit non-zero** (B-r1 widening, 2026-08-31) |
 | — | present, valid | normal operation (no board = no active campaign = normal off) |
 | — | present, **corrupt** | **loud failure, exit non-zero** |
 
-"Corrupt" means: duplicate anchor id, `.anchor` unparseable, **or `board.json` present
-and unparseable**.
+"Corrupt" means: duplicate anchor id, `.anchor` unparseable, **or a board present and
+unparseable** — anchored (`.hq/runtime/board.json`) or, since the 2026-08-31 widening,
+legacy with no anchor (`.orchestration/board.json`, `harness-tasks.json`). Row 2's warn
+channel is silent at hook entry, so a corrupt legacy store read as merely "unmigrated"
+was the same silent failure row 4 exists to surface. Two 2026-08-31 boundaries on
+rows 2-3, both measured: (a) the parse check follows `state_path` precedence — the
+board when it exists, else `harness-tasks.json` — so a corrupt *stale* sibling never
+overrides the valid file hooks actually read; (b) hook *discovery* is marker-file
+based, so a legacy store that is only an empty `.orchestration/` directory is never
+found by hooks at all — row 2's warn fires only when one of the three state files
+exists.
 
 Row 2 is the one worth stating plainly. A three-state design (off / on / broken) sends
 "legacy store present, not yet migrated" — the most dangerous state in the whole
@@ -389,7 +404,8 @@ value, a missing board, or a board that will not parse: every hook exits 0." The
 *missing* half stands. The *will not parse* half does not — that is a corrupt store
 being read as an absent one.
 
-Acceptance requires a fixture for all four rows. "Swallow every failure" survives as the
+Acceptance requires a fixture for all four rows, plus one for the unanchored
+legacy-corrupt widening. "Swallow every failure" survives as the
 rule everywhere except row 4.
 
 ### Row 4's one exception — `PreCompact` is loud without blocking (P1, 2026-08-27)
@@ -428,6 +444,12 @@ Cutover per harness runs in three stages:
 **Moves are two-step: copy, then verify. The legacy store is not deleted, trashed, or
 `git rm`-ed at move time.** Deletion is a separate `migrate-om-store.sh purge` subcommand
 that runs only after stage 2, per anchor.
+
+**The `.anchor` marker covers every store under it.** An anchor holding several legacy
+stores (`.omp` + `.omx`, ...) is one unit: create `.hq/.anchor` only after *all* of them
+are copied and verified — a gated or failed store blocks the marker. The migration tool
+says so at the end of a plan/apply run that leaves a store unfinished on an unanchored
+root (claudebase `migrate-om-store.sh`, 2026-08-31).
 
 The tool is `claudebase` `runtime/bin/migrate-om-store.sh` (P5, 2026-08-28) — dry-run by
 default, `apply` copies and sha256-verifies without deleting, `reverse` merges new-store

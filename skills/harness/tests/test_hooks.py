@@ -265,11 +265,14 @@ class TestCorruptGate(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("board.json", stderr)
 
-    def test_teammateidle_exits_2_on_corrupt_gate(self):
+    def test_teammateidle_warns_but_allows_idle_on_corrupt_gate(self):
+        # Exit 2 here has no retry escape, so it would block idle forever
+        # while the corruption persists (codex review 2026-08-31). The hook
+        # warns on stderr and allows idle; Stop owns the loud channel.
         self._write_anchor()
         self._write_board("{invalid")
         code, stdout, stderr = run_hook(IDLE_HOOK, self._payload())
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 0)
         self.assertIn("board.json", stderr)
 
     def test_subagentstop_exits_2_on_corrupt_gate(self):
@@ -279,16 +282,17 @@ class TestCorruptGate(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("board.json", stderr)
 
-    def test_subagentstart_still_exits_2_though_it_cannot_block_the_spawn(self):
-        # This hook's own docstring measured that exit 2 does not stop the
-        # spawn and its stderr is invisible to the user -- wired anyway for
-        # uniformity (see the comment at its call site). The exit code itself
-        # is still the observable, testable half of that.
+    def test_subagentstart_injects_corruption_notice_via_additionalcontext(self):
+        # Exit 2 cannot block the spawn and stderr is invisible (measured in
+        # the hook's docstring), so additionalContext is the one channel that
+        # reaches anyone (codex review 2026-08-31).
         self._write_anchor()
         self._write_board("{invalid")
         code, stdout, stderr = run_hook(SUBAGENT_START_HOOK, self._payload(agent_type="t1"))
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 0)
         self.assertIn("board.json", stderr)
+        self.assertIn("gate corrupt", stdout)
+        self.assertIn("additionalContext", stdout)
 
     def test_precompact_stays_non_blocking_but_reports_via_systemmessage(self):
         # Deliberately different from the other five: PreCompact CAN block
@@ -598,12 +602,14 @@ class TestSessionStartHook(unittest.TestCase):
         self.assertIn("total=0", data["hookSpecificOutput"]["additionalContext"])
 
     def test_corrupt_json_reports_error(self):
+        """B-r1 widening (2026-08-31): an unparseable legacy board with no
+        anchor is GATE_CORRUPT at hook entry -- stderr + exit 2, same as the
+        anchored corrupt case, instead of the old quiet context report."""
         (self.root / "harness-tasks.json").write_text("{invalid json")
         (self.root / "harness-progress.txt").write_text("")
-        code, stdout, _ = run_hook(SESSION_HOOK, self._payload())
-        self.assertEqual(code, 0)
-        data = json.loads(stdout)
-        self.assertIn("error", data["hookSpecificOutput"]["additionalContext"].lower())
+        code, stdout, stderr = run_hook(SESSION_HOOK, self._payload())
+        self.assertEqual(code, 2)
+        self.assertIn("corrupt", stderr.lower())
 
     def test_invalid_attempt_fields_no_crash(self):
         write_tasks(self.root, [
@@ -1312,13 +1318,16 @@ class TestBoardGate(unittest.TestCase):
         self.assertIn("Unmigrated", json.loads(stdout)["reason"])
 
     def test_corrupt_board_fails_closed(self):
-        """A board that will not parse is not an active one."""
+        """B-r1 widening (2026-08-31): a board that will not parse fails loud
+        (stderr + exit 2) even with no anchor, instead of being read as an
+        inactive store while hooks quietly stop firing."""
         d = self.root / ".orchestration"
         d.mkdir(parents=True, exist_ok=True)
         (d / "board.json").write_text("{not json", encoding="utf-8")
-        code, stdout, _ = run_hook(STOP_HOOK, self._payload())
-        self.assertEqual(code, 0)
-        self.assertEqual(stdout, "", "a broken board must not leave hooks firing")
+        code, stdout, stderr = run_hook(STOP_HOOK, self._payload())
+        self.assertEqual(code, 2)
+        self.assertIn("corrupt", stderr.lower())
+        self.assertEqual(stdout, "", "the corrupt gate speaks on stderr only")
 
 
 # ---------------------------------------------------------------------------
@@ -1562,6 +1571,36 @@ class TestBoardPathFollowsTheStore(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Claim hook -- retryability must match the Stop hook's failure count
 # ---------------------------------------------------------------------------
+class TestRootLocalLock(unittest.TestCase):
+    """The state lock lives in the root itself (root/.harness.lock) so TMPDIR
+    drift between sessions cannot split it. Before 2026-08-31 it hashed the
+    root into tempfile.gettempdir(), and two sessions with different TMPDIR
+    values locked different directories."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.root = Path(self.tmpdir)
+        sys.path.insert(0, str(HOOKS_DIR))
+        import _harness_common as hc
+        self.hc = hc
+
+    def tearDown(self):
+        import shutil
+        sys.path.remove(str(HOOKS_DIR))
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_lockdir_is_root_local(self):
+        self.assertEqual(self.hc.lockdir_for_root(self.root),
+                         self.root / ".harness.lock")
+
+    def test_acquire_creates_and_release_removes_in_root(self):
+        lockdir = self.hc.lockdir_for_root(self.root)
+        self.hc.acquire_lock(lockdir, 1.0)
+        self.assertTrue(lockdir.is_dir())
+        self.hc.release_lock(lockdir)
+        self.assertFalse(lockdir.exists())
+
+
 class TestClaimHook(unittest.TestCase):
     """harness-claim.py judges retryability on effective attempts --
     max(attempts, logged ERROR lines) -- the same count the Stop hook

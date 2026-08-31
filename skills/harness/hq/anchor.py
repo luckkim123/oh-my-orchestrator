@@ -8,7 +8,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import ANCHOR_REL, has_legacy_store, hq_board_json
+from .paths import (ANCHOR_REL, LEGACY_STATE_FILE, has_legacy_store,
+                    hq_board_json, legacy_board_json)
 
 GATE_OFF = "off"
 GATE_LEGACY = "legacy"
@@ -168,7 +169,8 @@ def gate_state(root: Path) -> tuple:
     | legacy store | .hq/.anchor | result                                    |
     |--------------|-------------|-------------------------------------------|
     | no           | no          | GATE_OFF                                  |
-    | yes          | no          | GATE_LEGACY (reason names the legacy path)|
+    | yes, board parses or absent | no | GATE_LEGACY (reason names the path) |
+    | yes, board unparseable      | no | GATE_CORRUPT (B-r1 widening, 2026-08-31)|
     | --           | yes, valid, unique id, board parses/absent | GATE_NORMAL|
     | --           | unparseable, or dup id, or board invalid   | GATE_CORRUPT|
     """
@@ -176,6 +178,23 @@ def gate_state(root: Path) -> tuple:
         anchor_file = root / ANCHOR_REL
         if not anchor_file.is_file():
             if has_legacy_store(root):
+                # B-r1 widening (2026-08-31): a legacy board that exists and
+                # will not parse is corrupt even with no anchor. GATE_LEGACY's
+                # warn channel is silent at hook entry (gate_corrupt_reason
+                # returns None for it), so a corrupt store read as merely
+                # "unmigrated" is the same silent failure row 4 exists to
+                # surface.
+                # Check only the file the hooks actually read -- state_path
+                # precedence: the board when it exists, else the legacy state
+                # file. A stale corrupt sibling must not override a valid
+                # live board (codex review 2026-08-31).
+                board = legacy_board_json(root)
+                selected = board if board.is_file() else root / LEGACY_STATE_FILE
+                if selected.is_file():
+                    try:
+                        json.loads(selected.read_text(encoding="utf-8"))
+                    except (OSError, ValueError) as e:
+                        return (GATE_CORRUPT, f"{selected}: legacy board invalid: {e}")
                 return (
                     GATE_LEGACY,
                     f"legacy store present at {root} (.orchestration/ or "

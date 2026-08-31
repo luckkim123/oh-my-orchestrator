@@ -173,6 +173,16 @@ def main() -> int:
     corrupt_reason = hc.gate_corrupt_reason(root) if hc else None
     if corrupt_reason is not None:
         sys.stderr.write(f"HARNESS: gate corrupt — {corrupt_reason}\n")
+        if stop_hook_active:
+            # Same loop escape the legacy parse handler below has always
+            # had: a corrupt store persists across retries, so blocking
+            # again with stop_hook_active True would loop on a file we
+            # cannot read. Loud both times; blocking only the first.
+            sys.stderr.write(
+                "HARNESS: WARN — corrupt store and stop_hook_active is True. "
+                "Allowing the stop rather than looping.\n"
+            )
+            return 0
         return 2
 
     # Guard: only active when harness skill is triggered

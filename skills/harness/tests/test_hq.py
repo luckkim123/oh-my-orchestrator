@@ -279,6 +279,38 @@ class GateStateTest(unittest.TestCase):
             self.assertEqual(state, GATE_LEGACY)
             self.assertTrue(reason)
 
+    def test_legacy_corrupt_tasks_file_no_anchor_is_corrupt(self):
+        """B-r1 widening (2026-08-31): an unparseable legacy board is corrupt
+        even with no anchor -- GATE_LEGACY's warn is silent at hook entry."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "harness-tasks.json").write_text("{invalid", encoding="utf-8")
+            state, reason = anchor.gate_state(root)
+            self.assertEqual(state, GATE_CORRUPT)
+            self.assertIn("legacy board invalid", reason)
+
+    def test_legacy_corrupt_orchestration_board_no_anchor_is_corrupt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".orchestration").mkdir()
+            (root / ".orchestration" / "board.json").write_text("{invalid", encoding="utf-8")
+            state, reason = anchor.gate_state(root)
+            self.assertEqual(state, GATE_CORRUPT)
+            self.assertIn("legacy board invalid", reason)
+
+    def test_stale_corrupt_tasks_file_does_not_override_valid_board(self):
+        """state_path precedence: the board when it exists is the file hooks
+        read, so a corrupt stale harness-tasks.json beside a valid live
+        .orchestration/board.json must not flip the gate (codex review
+        2026-08-31)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".orchestration").mkdir()
+            (root / ".orchestration" / "board.json").write_text('{"tasks": []}', encoding="utf-8")
+            (root / "harness-tasks.json").write_text("{invalid", encoding="utf-8")
+            state, reason = anchor.gate_state(root)
+            self.assertEqual(state, GATE_LEGACY)
+
     def test_valid_anchor_no_board_is_normal(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

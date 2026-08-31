@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.0] - 2026-08-31 — the npx installer is gone, and the lock lives where the state lives
+
+The legacy `npx github:stellarlinkco/myclaude` install path shipped its last
+release: 13 files removed (package.json, bin/cli.js, install/uninstall
+scripts, config.json + schema, the pre-bash hook and its orphaned
+hooks.json). What it alone provided — seeding `~/.codeagent/models.json` —
+moved to `scripts/seed_models.py`: copy the template when absent, merge only
+missing entries when present, never overwrite, atomic writes.
+
+### Removed
+- Legacy npx installer and everything only it consumed (13 files, −4,000 lines).
+- `config.json`/`config.schema.json` — `~/.codeagent/models.json` `agents.<role>`
+  is the one role-binding surface (vendor-ops.md updated in 3 places).
+
+### Added
+- `scripts/seed_models.py` — the supported way to create `models.json`.
+- Root-local lock: `<root>/.harness.lock` replaces the TMPDIR-hashed lockdir,
+  so TMPDIR drift between sessions cannot split the lock (`.gitignore` covers
+  `.harness.lock*/`, stale renames included).
+- B-r1 gate widening: an unparseable legacy board with no anchor is
+  GATE_CORRUPT (loud), no longer a silent GATE_LEGACY.
+
+### Changed (from the codex xhigh cross-review, 9 findings, all applied)
+- Gate corruption check follows `state_path` precedence — a corrupt stale
+  `harness-tasks.json` beside a valid live board no longer flips the gate.
+- `TeammateIdle` warns and allows idle on a corrupt gate instead of blocking
+  forever (it has no retry escape).
+- `SubagentStart` reports corruption via `additionalContext` — its exit 2 and
+  stderr were both measured invisible.
+- The SKILL.md bash lock snippet gained the `CLAUDE_PROJECT_DIR` discovery
+  layer, matching the Python side.
+- Surviving docs (Makefile, wrapper README/USER_GUIDE) stop recommending the
+  deleted npx path.
+- Codex effort defaults lowered (develop xhigh→medium, security xhigh→high) —
+  flat-rate vendor plans; task-type override remains the way up.
+- store-spec §6 (precedence + discovery boundary noted), §7 (the `.anchor`
+  marker covers every store under it).
+
+### Verification
+- `python3.12 -m pytest skills/harness/tests/ tests/test_version_sync.py` —
+  285 passed (new: root-local lock ×2, legacy corrupt ×2, stale-sibling
+  precedence ×1; updated: TeammateIdle/SubagentStart corrupt-channel
+  expectations).
+- Dual-store fixture: gate-closed warn fires, gate-open silent,
+  gitignored→tracked marks (claudebase side, commit 14a8c42).
+
 ## [0.20.0] - 2026-08-31 — every reader now counts failures the way the Stop hook does
 
 An audit against PLAN Phase 2-B found its claim — "the unlimited-retry hole is

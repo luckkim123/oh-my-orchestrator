@@ -128,7 +128,7 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f -name "codeagent-wrapper-*" -exec mv {} release/ \;
-          cp install.sh install.bat release/
+          cp install.sh release/
           ls -la release/
 
       - name: Create Release

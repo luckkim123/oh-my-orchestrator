@@ -14,8 +14,8 @@ Multi-backend AI code execution wrapper supporting Codex, Claude, Gemini, and Op
 ## Installation
 
 ```bash
-# Recommended: run the installer and select "codeagent-wrapper"
-npx github:stellarlinkco/myclaude
+# Recommended: build from source (the npx installer was removed in 0.21.0)
+cd codeagent-wrapper && make build && make install
 
 # Manual build (optional; requires repo checkout)
 cd codeagent-wrapper

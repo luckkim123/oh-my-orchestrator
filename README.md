@@ -58,9 +58,10 @@ delegation-gate redesign (0.15.0), and the call ledger (0.19.0) are all live.
 | `templates/orchestration/` | Seeds a project's `.hq/` shared knowledge store |
 | `templates/vendor/` | Vendor-side loader configs, so a worker reads the store on every task |
 
-Other upstream modules (`bmad`, `requirements`, `sparv`, `do`, `course`,
-`dev-kit`, `claudekit`) ship disabled in `config.json`. Their directories are
-kept so `git fetch upstream` keeps working — they are not deleted.
+The upstream npx installer (`package.json`, `bin/cli.js`, `install.py`,
+`config.json`, the root `hooks/`) was removed in 0.21.0 — the plugin system
+and `make install` above are the only install paths. `git fetch upstream`
+will conflict on those files; resolve by keeping the deletion.
 
 ## Install
 
@@ -88,15 +89,18 @@ build can shadow the fresh one while every existence check passes (the
 
 **3. The role table** — the wrapper resolves `--agent <role>` from
 `~/.codeagent/models.json` and fails loud with a template hint when it is
-missing. Seed it with your role→backend/model bindings; the shape and this
-repo's defaults are the `agents` blocks in `config.json`. The legacy
-`python3 install.py` merges those blocks into `models.json` for you, but it
-is the npx-era installer, not the plugin route. Do not run `install.sh`: it
-downloads an upstream binary that overwrites a local build
-(`skills/omo/references/vendor-ops.md`).
+missing. Seed it from the repo template:
 
-Edit `config.json` to change which modules are enabled. Only `omo` and
-`harness` are on by default.
+```bash
+python3 scripts/seed_models.py   # copies templates/models.json.example when absent,
+                                 # adds only the missing roles when present
+```
+
+Existing entries are never overwritten, so edit `models.json` freely and
+re-run after upgrades to pick up new roles. `install.sh` is a refusal
+stub — it exits with these build instructions instead of downloading the
+upstream binary that used to overwrite local builds
+(`skills/omo/references/vendor-ops.md`).
 
 ## Backend CLIs
 

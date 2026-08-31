@@ -35,3 +35,4 @@ output/
 # git cannot revive a child of an excluded directory).
 .graphify/
 graphify-out/
+**/.harness.lock*/

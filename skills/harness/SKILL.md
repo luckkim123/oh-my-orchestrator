@@ -306,31 +306,32 @@ Before modifying the state file (the board; legacy `harness-tasks.json`), acquir
 
 ```bash
 # Acquire lock (fail fast if another agent is running)
-# Lock key must match the hooks' (_harness_common.find_harness_root +
-# lockdir_for_root): HARNESS_STATE_ROOT first when it carries a marker, else
-# ascend from the PHYSICAL cwd (pwd -P -- the hooks hash the resolved path,
-# so a symlinked cwd would otherwise hash a different key) to the root
-# carrying one of the three state markers (ROOT_MARKERS).
+# The lock lives in the state root itself (matches the hooks'
+# _harness_common.lockdir_for_root): TMPDIR drift between sessions cannot
+# split it, and a symlinked cwd reaches the same lockdir inode either way.
+# Root discovery must still match find_harness_root: HARNESS_STATE_ROOT
+# first when it carries a marker, then ascend from CLAUDE_PROJECT_DIR,
+# then from the physical cwd (pwd -P) -- same order as the Python side,
+# or the two implementations lock different roots (codex review 2026-08-31).
 has_marker() {
   [ -f "$1/.hq/runtime/board.json" ] || [ -f "$1/.orchestration/board.json" ] || [ -f "$1/harness-tasks.json" ]
 }
 ROOT="${HARNESS_STATE_ROOT:-}"
 [ -n "$ROOT" ] && ROOT="$(cd "$ROOT" 2>/dev/null && pwd -P || printf '%s' "$ROOT")"
 if [ -z "$ROOT" ] || ! has_marker "$ROOT"; then
-  SEARCH="$(pwd -P)"
-  while [ "$SEARCH" != "/" ] && ! has_marker "$SEARCH"; do
-    SEARCH="$(dirname "$SEARCH")"
+  ROOT=""
+  for START in "${CLAUDE_PROJECT_DIR:-}" "$(pwd -P)"; do
+    [ -n "$START" ] || continue
+    SEARCH="$(cd "$START" 2>/dev/null && pwd -P)" || continue
+    while [ "$SEARCH" != "/" ] && ! has_marker "$SEARCH"; do
+      SEARCH="$(dirname "$SEARCH")"
+    done
+    if has_marker "$SEARCH"; then ROOT="$SEARCH"; break; fi
   done
-  if has_marker "$SEARCH"; then ROOT="$SEARCH"; else ROOT="$(pwd -P)"; fi
+  [ -n "$ROOT" ] || ROOT="$(pwd -P)"
 fi
 
-PWD_HASH="$(
-  printf '%s' "$ROOT" |
-    (shasum -a 256 2>/dev/null || sha256sum 2>/dev/null) |
-    awk '{print $1}' |
-    cut -c1-16
-)"
-LOCKDIR="${TMPDIR:-/tmp}/harness-${PWD_HASH:-unknown}.lock"
+LOCKDIR="$ROOT/.harness.lock"
 if ! mkdir "$LOCKDIR" 2>/dev/null; then
   # Check if lock holder is still alive
   LOCK_PID=$(cat "$LOCKDIR/pid" 2>/dev/null)

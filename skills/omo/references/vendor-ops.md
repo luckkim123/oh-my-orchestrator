@@ -18,7 +18,7 @@ hand-roll the CLI call:
 | `--skip-git-repo-check` on codex | `backend/codex.go` -- always appended | nothing |
 | Effort tier on codex | `backend/codex.go` -- emitted as `-c model_reasoning_effort=<v>` | `--reasoning-effort <tier>` |
 | Effort tier on claude | `backend/claude.go` -- emitted as `--effort <v>` | `--reasoning-effort <tier>` |
-| Backend + model selection | `config.json` `modules.omo.agents.<role>` | `--agent <role>`, or override with `--backend` / `--model` |
+| Backend + model selection | `~/.codeagent/models.json` `agents.<role>` (seed: `scripts/seed_models.py`) | `--agent <role>`, or override with `--backend` / `--model` |
 | Prompt delivery | stdin (`-`) or `--prompt-file` | the Context Pack heredoc |
 | Watching a call in a panel | `bin/omo-consult` -- Orca tab / tmux split / foreground | `--role`, `--workdir`, `--prompt <file>` |
 
@@ -131,9 +131,9 @@ slower and dearer. A tier below it returns a shallow answer that reads finished.
 
 ## Effort precedence: two tiers
 
-The role's `reasoning` in `config.json` is the **default**. The task type **overrides
+The role's `reasoning` in `~/.codeagent/models.json` is the **default**. The task type **overrides
 it** when the table above says so — a `develop` call doing a security audit runs
-`xhigh` even though its default is already there, and an `oracle` call answering a
+`xhigh` over its `medium` default, and an `oracle` call answering a
 mechanical lookup can drop to `low`.
 
 Set it explicitly with `--reasoning-effort` when you override. An override you do
@@ -141,19 +141,25 @@ not pass is an override that did not happen.
 
 ## Role assignment
 
-`config.json` `modules.omo.agents` binds each role to a backend and model.
+`~/.codeagent/models.json` `agents` binds each role to a backend and model
+(repo defaults: `templates/models.json.example`).
 **Measured 2026-08-26 on this machine** — the previous table pointed three roles at
 CLIs that are not installed:
 
 | Role | Backend | Model | Default effort |
 |:---|:---|:---|:---|
 | `oracle` | claude | claude-opus-5 | high |
-| `security` | codex | gpt-5.6-terra | xhigh |
-| `develop` | codex | gpt-5.6-terra | xhigh |
+| `security` | codex | gpt-5.6-terra | high |
+| `develop` | codex | gpt-5.6-terra | medium |
 | `librarian` | claude | claude-sonnet-5 | medium |
 | `explore` | codex | gpt-5.6-terra | low |
 | `frontend-ui-ux-engineer` | claude | claude-sonnet-5 | medium |
 | `document-writer` | claude | claude-sonnet-5 | medium |
+
+Codex defaults were lowered 2026-08-31 (develop xhigh -> medium, security xhigh ->
+high): the codex and gemini subscriptions are flat-rate plans with real token
+ceilings, so resting defaults stay lean and the task-type override above is the
+way up -- not a permanently high tier.
 
 **Diversity is counted in models, not backends** -- and it is counted against *your
 own* model, not just against the previous vendor. A backend running a Claude model

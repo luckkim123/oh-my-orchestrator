@@ -15,13 +15,11 @@ anchor-gated (store-spec.md §7 stage 2), mirroring hq/store.py: a parseable
 from __future__ import annotations
 
 import datetime as _dt
-import hashlib
 import json
 import os
 import re
 import shutil
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -267,7 +265,8 @@ def is_harness_active(root: Path) -> bool:
 
 def gate_corrupt_reason(root: Path) -> Optional[str]:
     """store-spec.md §6 row 4: a corrupt `.hq/.anchor` (duplicate anchor id,
-    unparseable `.anchor`, or a `board.json` that exists and will not parse)
+    unparseable `.anchor`, or a board that exists and will not parse --
+    anchored or, since the 2026-08-31 B-r1 widening, unanchored legacy)
     must fail loud, not be read as an absent store. `is_harness_active()`
     above reads a corrupt board as merely inactive -- correct for gating
     "should this hook do work", but it is also the exact silent-failure this
@@ -356,8 +355,9 @@ def tail_text(path: Path, max_bytes: int = 200_000) -> str:
 # ---------------------------------------------------------------------------
 
 def lockdir_for_root(root: Path) -> Path:
-    h = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:16]
-    return Path(tempfile.gettempdir()) / f"harness-{h}.lock"
+    # Root-local so TMPDIR drift between sessions cannot split the lock;
+    # the root is writable by construction (the board lives in it).
+    return root / ".harness.lock"
 
 
 def _pid_alive(pid: int) -> bool:

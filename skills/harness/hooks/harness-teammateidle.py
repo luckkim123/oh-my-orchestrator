@@ -28,13 +28,15 @@ def main() -> int:
     if root is None:
         return 0  # no harness project, allow idle
 
-    # store-spec.md §6 row 4: a corrupt .hq/.anchor (or an unparseable
-    # board.json under one) must fail loud, not be silently read as an
-    # inactive/absent store the way _is_harness_active() below reads it.
+    # store-spec.md §6 row 4 wants corruption loud, but this hook has no
+    # retry escape (no stop_hook_active equivalent): exit 2 here blocks the
+    # teammate from ever going idle while the corruption persists (codex
+    # review 2026-08-31). Stop/UserPromptSubmit own the loud channel; this
+    # hook warns and allows idle -- resting a teammate is the safe direction.
     corrupt_reason = hc.gate_corrupt_reason(root) if hc else None
     if corrupt_reason is not None:
         sys.stderr.write(f"HARNESS: gate corrupt — {corrupt_reason}\n")
-        return 2
+        return 0
 
     # Guard: only active when harness skill is triggered
     if not hc.is_harness_active(root):

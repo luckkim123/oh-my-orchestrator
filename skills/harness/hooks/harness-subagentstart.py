@@ -147,14 +147,20 @@ def main() -> int:
     # store-spec.md §6 row 4: a corrupt .hq/.anchor (or an unparseable
     # board.json under one) must fail loud, not be silently read as an
     # inactive/absent store the way is_harness_active() below reads it.
-    # (This hook's own docstring measured that exit 2 does not stop the
-    # spawn and its stderr is invisible -- wiring it anyway keeps behavior
-    # uniform with the other five hooks and costs nothing this hook does
-    # not already accept.)
+    # This hook's docstring measured that exit 2 does not stop the spawn
+    # and stderr is invisible -- additionalContext is the one channel that
+    # reaches anyone (codex review 2026-08-31), so the corruption notice
+    # rides it and the role-card injection below is skipped: the board it
+    # would inject from is the thing that failed to parse.
     corrupt_reason = hc.gate_corrupt_reason(root)
     if corrupt_reason is not None:
         sys.stderr.write(f"HARNESS: gate corrupt — {corrupt_reason}\n")
-        return 2
+        hc.emit_json({"hookSpecificOutput": {
+            "hookEventName": "SubagentStart",
+            "additionalContext": f"HARNESS: gate corrupt — {corrupt_reason}. "
+            "Fix the named file before relying on board state.",
+        }})
+        return 0
 
     if not hc.is_harness_active(root):
         return 0
