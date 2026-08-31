@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.2] - 2026-08-31 — the guard the sibling repos already had
+
+0.19.1 fixed a manifest that was never bumped. This adds the check that would
+have caught it, which every other om* repo has had since it was written for
+oh-my-scholar and ported to omp, omd and omx. omo was the one repo without it,
+which is the entire reason the drift survived a release.
+
+### Added
+- **`scripts/sync_version.py`** — read-only drift report across the version
+  surfaces: `.claude-plugin/plugin.json` (the anchor the marketplace resolves
+  against), the top released `CHANGELOG.md` heading, the latest comparable `v*`
+  tag, and the omha card. omo has no card, so that surface reports SKIP rather
+  than failing.
+- **`tests/test_version_sync.py`** — 14 tests. `test_plugin_changelog_drift_detected`
+  is the 0.19.0 defect itself, frozen: anchor `0.18.0` against a CHANGELOG top of
+  `0.19.0` must report drift.
+- **`.github/workflows/tag-guard.yml`** — the layer that makes the test binding.
+  `ci.yml` is Go-only and checks out shallow and tagless, which silently skips
+  the tag surface; this job fetches tags and runs the pytest file. A test no CI
+  job runs is the failure mode this repo has now recorded three times.
+
+### Changed
+- `parse_tags` takes `max_major` and ignores tags above the anchor's major.
+  **omo carries a legacy `v6.7.x`–`v6.8.2` lineage beside the live `v0.x`
+  series**, and the sibling implementation's plain max-by-tuple picks `v6.8.2`
+  forever — a guard that reports drift on every correct release is a guard that
+  gets ignored. The filter reopens on its own if the anchor ever reaches that
+  major.
+
+### Verification
+- Mutation, not just a green run: setting `plugin.json` back to `0.18.0` makes
+  `sync_version.py` exit 1 and name both surfaces
+  (`plugin.json version 0.18.0 != CHANGELOG top released 0.19.1`,
+  `latest tag v0.19.1 matches neither …`). Restoring it returns exit 0.
+- `python3.12 -m pytest tests/test_version_sync.py -q` → 14 passed.
+- `sync_version.py` on the release state → all surfaces PASS, card SKIP.
+
+### Notes
+- The two remaining version fields are untouched and still disagree with the
+  anchor by design-or-neglect: `package.json` at `6.7.0` and
+  `skills/omo/.claude-plugin/plugin.json` at `5.6.1`. The guard does not read
+  them, because it is not established which of them anything consumes.
+  Reconciling that is its own change.
+
 ## [0.19.1] - 2026-08-31 — the release that did not ship, and the check that let it not ship
 
 0.19.0 wrote its CHANGELOG, its skill text and its tag, and left
