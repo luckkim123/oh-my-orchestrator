@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.2] - 2026-08-31 — the same stale sentence, one section further down
+
+0.21.1 corrected §5's "`--purge` … has not run anywhere on this machine" and
+left §9.4's identical claim standing, so the shipped spec contradicted itself:
+§5 said the purge ran on 2026-08-28, §9.4 called the very lines it had deleted
+"Outstanding". Fixing a claim in one place and not in its other statement is
+the defect this spec keeps recording about other people's tooling.
+
+### Changed
+- `store-spec.md` §9.4 — the "Outstanding" group (`claudebase`'s `.omp/*` +
+  `!.omp/rules.json` + `**/.orchestration/.hq-lock`, the vault's `.omp/work/` ·
+  `.omp/state/` · `.omha/` + the same lock path) went with the stage-3 purge
+  itself (`ed36266`, `e746ea3c`), verified against both repos' current
+  `.gitignore`. What carries to other machines is the **ordering rule** — those
+  lines stay until that machine runs its own purge — not the date.
+
+### Verification
+287 tests pass. `grep 'has not run'` over the spec: 0 hits.
+
 ## [0.21.1] - 2026-08-31 — the staging state stops looking finished
 
 Reported by `ksm-MS-7E01` while migrating `stonefish_ws` (`.omp` + `.omx` under
