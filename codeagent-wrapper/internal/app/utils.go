@@ -7,9 +7,19 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	utils "codeagent-wrapper/internal/utils"
 )
+
+// stdinReadTimeout bounds the *implicit* pipe read below. A background launcher
+// (Claude Code's run_in_background) hands the process a stdin that is neither a
+// tty nor ever written to nor ever closed, so io.ReadAll blocks forever with no
+// diagnostic beyond one log line — measured at 65 minutes of silence on
+// 2026-08-31. The explicit form (`- <workdir> < file`) never reaches here; it
+// has its own branch in resolveSingleTaskText.
+// ponytail: fixed budget, make it configurable if a real producer ever needs longer.
+var stdinReadTimeout = 5 * time.Second
 
 func readPipedTask() (string, error) {
 	if isTerminal() {
@@ -17,9 +27,31 @@ func readPipedTask() (string, error) {
 		return "", nil
 	}
 	logInfo("Reading from stdin pipe...")
-	data, err := io.ReadAll(stdinReader)
-	if err != nil {
-		return "", fmt.Errorf("read stdin: %w", err)
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	// Buffered so the reader goroutine can still finish after we time out. It
+	// stays parked in ReadAll on a pipe nobody closes, which is acceptable: the
+	// timeout path is a hard error and the process exits right after.
+	done := make(chan readResult, 1)
+	go func() {
+		b, e := io.ReadAll(stdinReader)
+		done <- readResult{b, e}
+	}()
+
+	var data []byte
+	select {
+	case r := <-done:
+		if r.err != nil {
+			return "", fmt.Errorf("read stdin: %w", r.err)
+		}
+		data = r.data
+	case <-time.After(stdinReadTimeout):
+		return "", fmt.Errorf("stdin is not a tty but nothing arrived on it within %s: "+
+			"a task was expected on the pipe and none came. If this is a background "+
+			"launch, redirect stdin (`< /dev/null`) or use the explicit form "+
+			"`- <workdir> < file`", stdinReadTimeout)
 	}
 	if len(data) == 0 {
 		logInfo("Stdin pipe returned empty data")

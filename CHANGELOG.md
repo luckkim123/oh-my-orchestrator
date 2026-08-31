@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.3] - 2026-08-31 — the pipe nobody closes now has a deadline
+
+A background launcher hands the wrapper a stdin that is not a tty, is never
+written to, and is never closed. `readPipedTask` read that with `io.ReadAll`,
+which has no reason to ever return, so the call sat silent with one log line
+("Reading from stdin pipe...") and no timeout — measured at 65 minutes on
+2026-08-31, read the whole time as a running consultation.
+
+The `--prompt-file` framing in the first report was wrong: that flag supplies the
+agent prompt that *wraps* the task, not the task, and `parse.go` already rejects
+an empty positional list ("task required"), so `cfg.Task` is never empty. Skipping
+stdin whenever a task exists would therefore delete the implicit-pipe path
+entirely. Whether a pipe will ever produce is undecidable without waiting, so the
+wait is bounded instead.
+
+### Fixed
+- `internal/app/utils.go` `readPipedTask()` — the implicit pipe read is bounded by
+  `stdinReadTimeout` (5s) and fails loudly, naming both escapes (`< /dev/null`, or
+  the explicit `- <workdir> < file`). The explicit-stdin branch in
+  `resolveSingleTaskText` never reaches this path and is unchanged, as is the
+  precedence of piped text over a positional task.
+
+### Changed
+- `skills/omo/SKILL.md` — the invocation section now says where to launch a
+  consultation (`bin/omo-consult` pane when someone is watching; background only
+  when leaving) and to confirm liveness once right after firing. Zero bytes is not
+  "still thinking."
+
+### Verification
+Full Go suite green (`go test ./...`, 19 packages). New regression test
+`TestReadPipedTask_DeadlineOnNeverClosingStdin` reads a never-closing reader.
+Discriminated against a control that keeps the new variable and restores the old
+`io.ReadAll` body: the control is killed by `go test -timeout 15s`, the fix
+returns in 0.6s. Live probe against a held-open fifo: loud failure at 5s, exit
+non-zero, no vendor process launched.
+
 ## [0.21.2] - 2026-08-31 — the same stale sentence, one section further down
 
 0.21.1 corrected §5's "`--purge` … has not run anywhere on this machine" and

@@ -1,8 +1,10 @@
 package wrapper
 
 import (
+	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunSingleMode_UseStdin_TargetArgAndTaskText(t *testing.T) {
@@ -115,5 +117,52 @@ func TestRunSingleMode_UseStdin_TargetArgAndTaskText(t *testing.T) {
 				t.Fatalf("taskSpec.Task = %q, want %q", gotTask.Task, tt.wantTaskText)
 			}
 		})
+	}
+}
+
+// blockingReader models the stdin a background launcher hands us: not a tty,
+// never written to, never closed. Read parks until the test releases it.
+type blockingReader struct{ release chan struct{} }
+
+func (b blockingReader) Read([]byte) (int, error) {
+	<-b.release
+	return 0, io.EOF
+}
+
+// Regression: readPipedTask used to io.ReadAll such a pipe and block forever.
+// Measured 65 minutes of silence on 2026-08-31 before the deadline existed.
+func TestReadPipedTask_DeadlineOnNeverClosingStdin(t *testing.T) {
+	defer resetTestHooks()
+
+	setTempDirEnv(t, t.TempDir())
+	logger, err := NewLogger()
+	if err != nil {
+		t.Fatalf("NewLogger(): %v", err)
+	}
+	setLogger(logger)
+	t.Cleanup(func() { _ = closeLogger() })
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	stdinReader = blockingReader{release: release}
+	isTerminalFn = func() bool { return false }
+
+	prev := stdinReadTimeout
+	stdinReadTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { stdinReadTimeout = prev })
+
+	start := time.Now()
+	got, err := readPipedTask()
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("readPipedTask() = %q, want a deadline error", got)
+	}
+	if !strings.Contains(err.Error(), "nothing arrived on it") {
+		t.Fatalf("error = %v, want the stdin-deadline message", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("readPipedTask() took %s, want it bounded by the deadline", elapsed)
 	}
 }

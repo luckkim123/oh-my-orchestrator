@@ -230,6 +230,16 @@ Run it through the shell tool. Timeouts, reasoning-effort tiers, and vendor fail
 modes are in `references/vendor-ops.md` — read that before your first call in a
 session.
 
+**Launch it where you can watch it, then confirm once that it is alive.** With a
+person at the session, `bin/omo-consult` puts the call in a visible pane (Orca or
+tmux); background launch is for when you are leaving. Either way, check liveness
+immediately after firing — tail the log or the `--output` file and see bytes
+arriving. **Zero bytes is not "still thinking."** A background launcher hands the
+wrapper a stdin that is never closed, and until 0.21.3 the wrapper waited on it
+forever: measured 2026-08-31, 65 minutes of silence that read as a running
+consultation. The wait is now bounded to 5 seconds and fails loudly, which you
+only see if you look.
+
 **Every Context Pack slot is written out.** An empty slot says `None`; a missing slot
 says nothing at all, and the consumer cannot tell "there was no oracle pass" from
 "the oracle pass was dropped on the way here." The role cards declare the same
