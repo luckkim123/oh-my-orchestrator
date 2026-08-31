@@ -756,12 +756,15 @@ belongs to `claudebase`, not to `oh-my-project`), `omo` has none. Independently
 verified per repo (not taken on report) with `grep -n '\.omp\|\.oms\|\.omd\|\.omx\|\.omha'
 .gitignore` against each of the five sibling checkouts on this machine.
 
-Outstanding, and this is **not** the same as the removals above — these come
-after `--purge` (§7 stage 3), which has not run on this machine: `claudebase`'s
-own `.omp/*` + `!.omp/rules.json` and `**/.orchestration/.hq-lock`, and the
-vault's `.omp/work/` · `.omp/state/` · `.omha/` · `**/.orchestration/.hq-lock`.
-No file has been deleted anywhere in this campaign; only ignore lines for
-already-migrated, still-present legacy directories have been dropped.
+The second group — `claudebase`'s own `.omp/*` + `!.omp/rules.json` and
+`**/.orchestration/.hq-lock`, and the vault's `.omp/work/` · `.omp/state/` ·
+`.omha/` · `**/.orchestration/.hq-lock` — was **not** the same as the removals
+above: those lines guarded legacy directories that still existed, so they could
+only go *with* `--purge` (§7 stage 3), never ahead of it. That purge ran on
+`ksm-mac` 2026-08-28 and both groups went with it (`claudebase` `ed36266`,
+vault `e746ea3c`). **On every other machine the legacy stores are still on disk
+and those lines stay** until that machine runs its own purge — the ordering
+rule, not the calendar date, is what carries over.
 
 | Repo | Legacy lines today | Note |
 |:---|:---|:---|
