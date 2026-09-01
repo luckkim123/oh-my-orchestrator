@@ -182,6 +182,64 @@ class TestWrapperStatus(unittest.TestCase):
         self.assertIn("unstamped", census.wrapper_status("0.21.6"))
 
 
+class TestHqStatus(unittest.TestCase):
+    """`hq` present is not `hq` installed — see hq_status's docstring."""
+
+    def setUp(self):
+        self._which, self._real = census.shutil.which, census.os.path.realpath
+        self._home = census.Path.home
+
+    def tearDown(self):
+        census.shutil.which, census.os.path.realpath = self._which, self._real
+        census.Path.home = self._home
+
+    def _patch(self, path, home, real=None):
+        census.shutil.which = lambda name: path if name == "hq" else None
+        census.os.path.realpath = lambda p: real or p
+        census.Path.home = staticmethod(lambda: Path(home))
+
+    def test_missing_names_the_fix(self):
+        with tempfile.TemporaryDirectory() as home:
+            self._patch(None, home)
+            self.assertIn("omo-init", census.hq_status())
+
+    def test_a_plugin_cache_hit_is_not_installed(self):
+        # The default state on any machine with the plugin enabled: Claude Code
+        # puts the plugin's bin/ on the session PATH, and the next update
+        # replaces that versioned directory.
+        with tempfile.TemporaryDirectory() as home:
+            self._patch(f"{home}/.claude/plugins/cache/heroacademia/"
+                        "oh-my-orchestrator/0.22.0/bin/hq", home)
+            self.assertIn("version-pinned", census.hq_status())
+
+    def test_a_stable_path_entry_is_ok(self):
+        with tempfile.TemporaryDirectory() as home:
+            self._patch(f"{home}/.local/bin/hq", home)
+            self.assertEqual(census.hq_status(), "ok")
+
+    def test_a_symlink_into_the_cache_is_not_stable(self):
+        """`/usr/local/bin/hq -> …/cache/0.22.0/bin/hq` looks installed and dies
+        with the next update. The test is on the realpath (codex, 2026-09-01)."""
+        with tempfile.TemporaryDirectory() as home:
+            self._patch("/usr/local/bin/hq", home,
+                        real=f"{home}/.claude/plugins/cache/heroacademia/"
+                             "oh-my-orchestrator/0.22.0/bin/hq")
+            self.assertIn("version-pinned", census.hq_status())
+
+    def test_an_installed_shim_behind_the_cache_on_path_says_reorder(self):
+        """Re-running omo-init cannot fix a PATH ORDER problem, so it must not
+        be the advice given to someone who just ran it."""
+        with tempfile.TemporaryDirectory() as home:
+            shim = Path(home) / ".local" / "bin"
+            shim.mkdir(parents=True)
+            (shim / "hq").write_text("#!/bin/sh\n")
+            self._patch(f"{home}/.claude/plugins/cache/heroacademia/"
+                        "oh-my-orchestrator/0.22.0/bin/hq", home)
+            status = census.hq_status()
+            self.assertIn("shadowed", status)
+            self.assertNotIn("run omo-init", status)
+
+
 class TestPromptEvent(unittest.TestCase):
     def test_fires_and_writes_state(self):
         with tempfile.TemporaryDirectory() as td:

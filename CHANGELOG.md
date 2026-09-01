@@ -2,6 +2,166 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.23.0] - 2026-09-01 — the store CLI was never installed, and the converter held answers it wrote as null
+
+A defect report from `ksm-MS-7E01` (a Linux container whose work tree mounts at
+`/workspace`) after migrating two anchors to `.hq/` by the documented procedure.
+Three defects, all met by following the steps as written. Two of the report's own
+diagnoses were wrong in ways that moved the fix, which is recorded below rather
+than smoothed over.
+
+### Fixed
+
+- **`hq` was never put anywhere stable on PATH, so a store holding 300 posts read
+  as empty.** `omx wiki list` returned `{"pages": [], "post_store": {"ok": false,
+  "error": "hq not on PATH"}}` and the operator concluded the wiki had been lost.
+  Every omx/omp/omd reader shells out to `hq` by bare name; nothing ever linked
+  `bin/hq` outside the plugin directory.
+
+  The report read this as a claudebase-installer gap. Measured here it is
+  narrower and worse: Claude Code puts an enabled plugin's `bin/` on the
+  **session** PATH, so `hq` answers inside a session, is absent from every hook
+  subprocess and plain shell, and the copy that does answer is pinned to a
+  versioned directory the next update replaces. On this machine `command -v hq`
+  resolved to `…/oh-my-orchestrator/0.21.6/bin/hq` — present, and one update
+  from gone.
+
+  `omo-init` now writes `~/.local/bin/hq` — a **shim, not a symlink**, resolving
+  the newest plugin-cache directory at run time with the checkout it was
+  installed from as the fallback. It runs on `--wrapper-only` too, which is what
+  `install.sh` execs. And `omo-census` now reports `hq:` in its injected line,
+  with `version-pinned` as its own state distinct from `ok` — because a tool no
+  layer points at is a tool that dies, which is the third time this repo has
+  learned that.
+
+- **`convert-wiki-form.py` derived `topic` from the directory only, so a flat
+  store planned 300 pages as `topic: null` while holding the answer.** omx's
+  wiki is flat AND carries `category:` in frontmatter, and on the albc store all
+  7 distinct values were already valid TOPICS with 0 unmappable. The tool had
+  them the whole time, in `kept_fields`, unread — the same shape as the
+  `confidence:` defect this file recorded two releases ago. `plan` now falls
+  back to `category:` when there is no directory; the directory still wins when
+  both exist, and an unmappable value is still refused, never guessed.
+
+- **`date` now falls back to `created:` — and the report's mechanism for it was
+  wrong in a way that changed the code.** The report said 65 pages had no `date:`
+  and no derivable `verified:` while carrying `created:`. But `derive_verified`
+  scans the whole file *including frontmatter*, so a bare `created: 2026-07-04`
+  was never one of those 65. What is one is a **timestamp**: `_ISO`'s trailing
+  `\b` fails on the `T` of `2026-07-04T13:22:11Z`. So the fallback slices the
+  leading `YYYY-MM-DD` rather than taking the raw value — `date:` is a day per
+  store-spec §4, and a timestamp is not one. Taking the field verbatim, which is
+  what the report proposed, would have written a schema-invalid date.
+
+- **A fourth defect the report did not name: 300 posts landed with no
+  `harness:` at all, and `hq lint` called the store clean.** `apply` called
+  `post_new(harness=e.get("harness", "omo"))` on entries whose `harness` key was
+  PRESENT and `None` — a wiki page never carried the field, because `harness:`
+  is what REPLACED the per-harness directory (store-spec §1). `dict.get` returns
+  the stored `None`, the keyword default never fires, and the renderer drops a
+  falsy field, so `hq query --harness omx` answered `{"posts": []}` on the store
+  holding all 300 of them.
+
+  Three layers, because one was not enough. `post_new` now **rejects** a falsy
+  `harness` rather than defaulting — a wrong harness is worse than a missing one
+  because it looks answered. `convert-wiki-form.py` takes `--harness`, defaulted
+  from the distinct `harness` values in `migrated.jsonl` (the only surviving
+  record of which legacy store a staged page came from) and refusing when that
+  ledger names none or several. And `hq lint` now warns, aggregated with a
+  count, on posts carrying no `harness:` — it had validated the vocabulary of
+  the fields present and never the presence of this one.
+
+- **`omo-init` no longer seeds its parent's store from a nested repo**, and
+  `install_wrapper` no longer unlinks a regular file at
+  `~/.local/bin/codeagent-wrapper` without `--force`.
+
+### Added
+
+- **`apply` writes `<plan>.idmap.json` — the old-page → new-id map.** A page's
+  `links:`/`sources:` cite other pages **by old filename**, and `git rm` makes
+  every one of them dangle: the citation graph between converted pages is what a
+  conversion silently costs, once per anchor. The loop already knew the join and
+  printed `path -> id` to stdout, where the terminal carried it away. It is now a
+  file, keyed by both full path and bare stem, carrying the `anchor_id` for §4's
+  cross-anchor citation form.
+
+  **This is deliberately not a schema change.** `sources:` measured empty or
+  constant on every store censused for §9.3, and one store's need does not widen
+  a schema every anchor has to satisfy — `verified:` remains the provenance
+  field. Moving `sources:` into the page body before converting is the supported
+  path, now written down.
+
+### Fixed after the 2-family review
+
+The change was sent to codex and agy in parallel under ground 4 before shipping
+(the release gate in `release-family-gate.py`). They returned 22 findings with
+almost no overlap, and the ones below were real:
+
+- **The documented rerun destroyed the map.** `apply` then `apply --commit` is
+  what the tool's own message tells an operator to do. On the second run every
+  page lands in `skipped`, `skipped` carried no post id, the map was rebuilt
+  from `created` alone as `{}` — and then `git rm` ran. Both halves are fixed:
+  `skipped` now carries the id of the post its subject already has, and the file
+  is merged rather than rebuilt. Interrupted runs resume for the same reason.
+- **The map was written after the deletion.** An unwritable directory left a
+  live post, a deleted source, and no map. It is now written **before** `git rm`,
+  atomically, and a failure to write it aborts with the pages still in place.
+  A corrupt existing map aborts rather than being overwritten.
+- **A key two pages both claim is dropped, not aliased.** `convention/a.md` and
+  `debugging/a.md` both claim `a.md`; keeping the last silently resolved a
+  citation to the WRONG post. Dropped and listed under `ambiguous:`. The bare
+  filename `a.md` — the form `links:` actually holds — was also missing from the
+  map entirely, which the comment claimed it carried.
+- **`omo-init` destroyed a user file at `~/.local/bin/hq`.** HyperQueue ships an
+  `hq` too. It now requires `--force` for anything it did not write itself,
+  matching `install_wrapper` and this script's own "existing files are never
+  overwritten" claim.
+- **The shim picked directories that were not versions.** `ls | sort -V | tail -1`
+  selects `tmp/`, `staging/`, or an interrupted empty `0.23.0/` and hands python3
+  a path that does not exist. Every candidate is now checked for the `cli.py` it
+  will be asked to run. `ls` is gone too: GNU `ls` honours `QUOTING_STYLE`, and
+  `shell-always` puts literal quote characters into the path. Verified against
+  all three cases.
+- **`_leading_day` manufactured impossible dates and dropped quoted ones.**
+  `2026-02-31garbage` passed the shape check and serialized; `created:
+  "2026-07-04T13:22:11Z"` returned null. It now unquotes, requires a real
+  timestamp boundary, and validates the calendar day. Quoted `category:` had the
+  same defect in the other direction — `"debugging"` refused as unmappable.
+- **A timestamp in `date:` bypassed the slice entirely** and reached
+  `post_new`'s `YYYY-MM-DD` validator as a crash. The slice is on both fields now.
+- **`hq_status` was fooled by a symlink and gave advice that cannot work.**
+  `/usr/local/bin/hq -> …/cache/0.22.0/bin/hq` reported `ok` and dies with the
+  next update; the test is on the realpath. And when the cache precedes the shim
+  on PATH, re-running `omo-init` cannot change which `hq` runs — that state is
+  now its own `shadowed(...)` reading that names the ordering, not a loop telling
+  someone who just ran `omo-init` to run it again.
+- **omx prescribed `command -v hq` for failures that are not PATH misses.** An
+  unanchored root, a corrupt store, a timeout: the check passes and points away
+  from the cause. The remediation is now chosen from the error.
+- **store-spec claimed the purge prompt cannot be passed by an agent. It can.**
+  The check is `[ -r /dev/tty ]` and nothing more, so anything in a PTY — a tmux
+  pane, an Orca terminal — types the confirmation as easily as a person. The
+  section said the opposite and now says what the check actually guards against.
+  This one was in the incoming defect report too, and repeating it was the error.
+
+### Changed
+
+- **store-spec §9.3.1 is new**: what `DROP_FIELDS` drops, why the refusal an
+  operator meets is the tool working rather than a bug to route around, and what
+  to do at it. The fact that the list is lossy lived only in a code comment.
+- **store-spec §7 pins the migration order**: create the anchor **first**,
+  convert the staged wiki **second**. `community_dir()` resolves through
+  `.hq/.anchor`, so the converter cannot see staged pages before the anchor
+  exists — while `migrate-om-store.sh` warns "do not create `.hq/.anchor` yet".
+  That warning is advisory and the two messages read as contradicting each other.
+  §7 also now states that `purge`'s `/dev/tty` confirmation is unreachable from
+  an agent session by construction, and what an operator does instead.
+- **store-spec §9 names the `$HOME` bound on the census.** The report attributed
+  a sentence about it to §9; that sentence did not exist (grep, 0 hits) — the
+  `find ~` was visible in the command and stated as a limit nowhere. An anchor
+  under `/workspace` is reported as `in scope: 0` with no diagnostic, which is
+  the container case and increasingly the common one.
+
 ## [0.22.0] - 2026-09-01 — the skill was invoked and nothing was required of it
 
 A user on another machine invoked `/oh-my-orchestrator:omo` and wrote "use omo's

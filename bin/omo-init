@@ -15,7 +15,8 @@ same procedure with a name.
   omo-init                    seed + install loaders + census, in an existing .hq/
   omo-init --create           also create the .hq/ if there is none
   omo-init --dry-run          say what would change, touch nothing
-  omo-init --wrapper-only     just build/install/symlink codeagent-wrapper
+  omo-init --wrapper-only     just the two CLIs: build/symlink codeagent-wrapper
+                              and write the `hq` shim onto PATH
   omo-init --census-only      just print the census line
 
 Existing files are never overwritten. Seeding is additive by construction, so
@@ -26,6 +27,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -106,6 +108,93 @@ def seed(hq: Path, dry: bool, force: bool) -> list:
             if not dry:
                 d.mkdir(parents=True, exist_ok=True)
                 (d / ".gitkeep").touch()
+    return actions
+
+
+_HQ_MARKER = "# omo-init generated hq shim -- safe to overwrite"
+_HQ_SHIM = """#!/bin/sh
+{marker}
+# Resolves at RUN time, never at install time: `bin/hq` lives inside a VERSIONED
+# plugin directory, so a symlink to it dies on the next plugin update -- which is
+# the whole failure this shim exists to end.
+#
+# No `ls`: GNU `ls` honours QUOTING_STYLE, and `shell-always` puts literal quote
+# characters into the output, which command substitution then stores in the
+# variable and python3 opens as part of the path. A shell glob has no such knob.
+#
+# Every candidate is checked for the file it will be asked to run. `sort -V |
+# tail -1` alone picks a later-sorting directory that is not a version at all --
+# `tmp/`, `staging/`, an interrupted empty `0.23.0/` -- and hands python3 a path
+# that does not exist. A directory without cli.py is not a candidate.
+CACHE="$HOME/.claude/plugins/cache/heroacademia/oh-my-orchestrator"
+best=$(for c in "$CACHE"/*/; do
+         [ -f "$c/skills/harness/hq/cli.py" ] || continue
+         printf '%s\\n' "${{c%/}}"
+       done | sort -V | tail -1)
+[ -n "$best" ] || best={fallback}
+exec python3 "$best/skills/harness/hq/cli.py" "$@"
+"""
+
+
+def install_hq(dry: bool, force: bool = False) -> list:
+    """Put `hq` somewhere stable on PATH.
+
+    Nothing ever did. `hq` ships as `bin/hq` inside the plugin, and Claude Code
+    puts an enabled plugin's `bin/` on the session PATH -- so it answers inside
+    a session, is absent from every hook subprocess and plain shell, and the
+    copy that does answer is pinned to a directory the next update replaces.
+    Every omx/omp/omd reader shells out to `hq` by bare name, and a miss returns
+    `{{"ok": false, "count": 0}}` beside a `pages: []` that reads exactly like an
+    empty store: 300 posts on disk looked lost (ksm-MS-7E01, 2026-09-01).
+
+    A shim rather than a symlink, for the reason in its own header. Our own
+    generated shim is rewritten freely -- it is generated, not hand-edited, so a
+    stale copy must not outlive a change to the resolution rule. Anything ELSE
+    at that path is somebody's file (HyperQueue also ships an `hq`) and needs
+    `--force`, the same contract `install_wrapper` follows.
+    """
+    dst = Path.home() / ".local" / "bin" / "hq"
+    body = _HQ_SHIM.format(marker=_HQ_MARKER, fallback=shlex.quote(str(REPO)))
+    actions = [f"write {dst} (shim -> newest plugin cache, else {REPO})"]
+
+    if dst.is_dir():
+        return [f"FAILED: {dst} is a directory -- move it aside"]
+    ours = False
+    if dst.exists() and not dst.is_symlink():
+        try:
+            ours = _HQ_MARKER in dst.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            ours = False
+        if not ours and not force:
+            return [f"FAILED: {dst} exists and was not written by omo-init. Move it "
+                    "aside, or re-run with --force to replace it."]
+    if dry:
+        return actions
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.is_symlink():
+        dst.unlink()          # an older install may have left one
+    try:
+        dst.write_text(body, encoding="utf-8")
+        dst.chmod(0o755)
+    except OSError as e:
+        return [f"FAILED: cannot write {dst} ({e.strerror})"]
+
+    # Presence on PATH is not enough -- ORDER decides which `hq` runs, and the
+    # plugin cache is on the session PATH too. Installing in front of nothing
+    # changes nothing, and re-running cannot fix it, so say so once.
+    entries = [e for e in os.environ.get("PATH", "").split(os.pathsep) if e]
+    if str(dst.parent) not in entries:
+        actions.append(f"WARNING: {dst.parent} is not on PATH -- add it, or `hq` "
+                       "still answers only inside a Claude session")
+    else:
+        here = entries.index(str(dst.parent))
+        shadow = next((e for i, e in enumerate(entries)
+                       if i < here and (Path(e) / "hq").exists()), None)
+        if shadow:
+            actions.append(f"WARNING: {shadow} precedes {dst.parent} on PATH and also "
+                           "has an `hq` -- bare `hq` still resolves there. Re-running "
+                           "omo-init cannot fix an ordering problem; move "
+                           f"{dst.parent} earlier.")
     return actions
 
 
@@ -204,6 +293,7 @@ def main(argv=None) -> int:
     out = []
     if a.wrapper_only:
         out += install_wrapper(a.dry_run, a.force)
+        out += install_hq(a.dry_run, a.force)
     else:
         hq = find_store(project, hq_root, ceiling=root)
         if hq is None:
@@ -221,6 +311,7 @@ def main(argv=None) -> int:
         # the subpackage while `.hq/` sat at the repo root (agy, 2026-09-01).
         out += install_loaders(hq.parent, a.dry_run)
         out += install_wrapper(a.dry_run, a.force)
+        out += install_hq(a.dry_run, a.force)
 
     for line in out:
         print(line)

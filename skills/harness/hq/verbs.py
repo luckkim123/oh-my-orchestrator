@@ -108,6 +108,23 @@ def post_new(anchor_root, *, category, title, author, summary, body, harness="om
         raise HqError(f"unknown status {status!r}; expected one of {STATUSES}")
     if supersedes is not None and subject is None:
         raise HqError("supersedes given but subject is absent — a chain needs a subject")
+    # The keyword default is not a guard. `dict.get(k, d)` returns the STORED
+    # value when the key exists, so a caller reading `harness` out of a legacy
+    # page's frontmatter -- `e.get("harness", "omo")` where `e["harness"]` is
+    # None because a wiki page never had the field -- passes None here and
+    # never reaches "omo". `fields` then carries `harness: None` and the
+    # renderer's `if fields.get(k)` drops the line: a post with no harness,
+    # written by a call that looks like it set one. Measured 300 of 300 posts
+    # on ksm-MS-7E01, 2026-09-01, after which `hq query --harness omx`
+    # returned `{"posts": []}` on the store holding all of them.
+    #
+    # Rejected rather than defaulted, and that is the decision: `or "omo"` here
+    # would have stamped 300 omx posts as omo, and a wrong harness is worse
+    # than a missing one because it looks answered. Guarded at this one point
+    # because every writer routes through it; the CLI already passes a string.
+    if not harness:
+        raise HqError("harness is required — pass the harness that wrote this post; "
+                      "`hq query --harness` partitions on it (store-spec §1)")
 
     def _do():
         if supersedes is not None:
@@ -587,6 +604,25 @@ def lint(start):
         s = p.fields.get("status")
         if s is not None and s not in STATUSES:
             errors.append(f"{p.id}: status {s!r} not in {STATUSES}")
+
+    # Aggregated, and a warning rather than an error. `harness:` is what
+    # store-spec §1 partitions on -- it is the field that replaced the
+    # per-harness directory, so a post without one is unreachable through
+    # `hq query --harness` and reachable by nothing else. The whole reason it
+    # needs saying here is that nothing said it: 300 posts landed with the
+    # field dropped (ksm-MS-7E01, 2026-09-01) and lint answered `clean`,
+    # because lint validated the VOCABULARY of the fields present and never
+    # the presence of one. Not an error, because a legacy store mid-migration
+    # legitimately holds pre-schema posts; not per-post, because 300 lines is
+    # how a finding gets scrolled past. The count is the finding.
+    no_harness = [p for p in posts if not p.fields.get("harness")]
+    if no_harness:
+        warnings.append(
+            f"{len(no_harness)} post(s) have no harness: — invisible to "
+            f"`hq query --harness` (store-spec §1). First: "
+            f"{', '.join(p.id for p in no_harness[:5])}"
+            f"{'...' if len(no_harness) > 5 else ''}"
+        )
 
     for p in posts:
         for entry in p.comments:

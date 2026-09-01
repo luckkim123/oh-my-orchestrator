@@ -170,6 +170,41 @@ def wrapper_status(want: str) -> str:
     return f"{got}!={want}(STALE)"
 
 
+def hq_status() -> str:
+    """Whether the store CLI is reachable, and whether that reach outlives today.
+
+    Every omx/omp/omd reader shells out to `hq` by bare name, and a miss comes
+    back as `{"ok": false, "count": 0}` beside a `pages: []` the caller reads
+    first. Measured ksm-MS-7E01, 2026-09-01: 300 posts on disk, `hq` off PATH,
+    and the operator read the store as lost.
+
+    "Present" is not the answer. An `hq` that RESOLVES INTO a versioned
+    plugin-cache directory dies at the next plugin update, and that is the
+    default state -- nothing has ever linked it anywhere stable. The test is on
+    the realpath, not the PATH hit: `/usr/local/bin/hq -> …/cache/0.22.0/bin/hq`
+    looks stable and is not (codex, 2026-09-01).
+
+    And it names the RIGHT fix. When the cache directory sits ahead of the
+    installed shim on PATH, bare `hq` keeps resolving there and re-running
+    `omo-init` cannot change it -- that is an ordering problem, not a missing
+    file, and saying "run omo-init" to someone who just did is a loop.
+    """
+    path = shutil.which("hq")
+    if not path:
+        return "MISSING(run omo-init)"
+    try:
+        real = os.path.realpath(path)
+    except OSError:
+        real = path
+    cache = os.path.join(str(Path.home()), ".claude", "plugins", "cache") + os.sep
+    if not real.startswith(cache):
+        return "ok"
+    shim = Path.home() / ".local" / "bin" / "hq"
+    if shim.exists():
+        return "shadowed(plugin cache precedes ~/.local/bin on PATH; reorder PATH)"
+    return "version-pinned(dies on plugin update; run omo-init)"
+
+
 def backend_status() -> str:
     present = [b for b in _BACKENDS if shutil.which(b)]
     if not present:
@@ -226,7 +261,7 @@ def store_status(cwd: Path) -> str:
 def census_line(cwd: Path) -> str:
     return (
         f"OMO -> wrapper:{wrapper_status(plugin_version())} "
-        f"backends:{backend_status()} store:{store_status(cwd)}"
+        f"backends:{backend_status()} hq:{hq_status()} store:{store_status(cwd)}"
     )
 
 

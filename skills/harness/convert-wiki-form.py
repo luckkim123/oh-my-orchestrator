@@ -4,7 +4,7 @@
 Two phases, because the conversion is not fully mechanical and pretending it
 is would invent the parts that matter:
 
-    convert-wiki-form.py plan  <anchor> [--out plan.json]
+    convert-wiki-form.py plan  <anchor> [--harness omx] [--out plan.json]
     convert-wiki-form.py apply <anchor> --plan plan.json [--commit]
 
 `plan` reads every page and fills in what is DERIVABLE. It leaves three fields
@@ -27,7 +27,9 @@ each one goes wrong in a specific way:
 `verbs.post_new` (the store's one serializer, and its `now=` takes the page's
 own date -- the CLI's missing `--date` is what forced the post-hoc `sed` that
 `finding/098` recorded as a trap), verifies the body survived byte-for-byte,
-and `git rm`s the originals.
+and `git rm`s the originals. It also writes `<plan>.idmap.json` — the
+old-page -> new-id map, which is what a page's `links:`/`sources:` need to stay
+resolvable once the files they name are gone (store-spec §9.3.1). Keep it.
 
 What it will NOT do, by design: create a `community/wiki/` directory, or write
 anything into one. That form is retired (r7, user decision 2026-08-30).
@@ -35,6 +37,7 @@ anything into one. That form is retired (r7, user decision 2026-08-30).
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import re
 import subprocess
@@ -44,7 +47,8 @@ from pathlib import Path
 HARNESS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(HARNESS_DIR))
 from hq import verbs  # noqa: E402
-from hq.anchor import HqError  # noqa: E402
+from hq.anchor import HqError, parse_anchor  # noqa: E402
+from hq.paths import ANCHOR_REL, HQ_ROOT  # noqa: E402
 from hq.post import CATEGORIES, TOPICS  # noqa: E402
 from hq.store import community_dir, list_posts  # noqa: E402
 
@@ -131,6 +135,36 @@ def derive_verified(text: str):
     return max(dates) if dates else None
 
 
+def _unquote(value):
+    """YAML's quotes are not part of the value. `parse_page` splits on the first
+    colon and strips whitespace only, so `category: "debugging"` arrives with the
+    quote characters attached -- which compares unequal to every TOPIC and turned
+    a valid page into an unmappable-category refusal."""
+    v = (value or "").strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        v = v[1:-1].strip()
+    return v
+
+
+def _leading_day(value):
+    """`YYYY-MM-DD` off the front of a date or timestamp, or None.
+
+    A day, not a prefix that looks like one: `2026-02-31garbage` matched the
+    shape and `post_new` validates the shape only, so an impossible calendar
+    date serialized cleanly. And the rest has to be a real timestamp boundary --
+    otherwise `2026-07-0499` reads as the 4th.
+    """
+    v = _unquote(value)
+    m = re.match(r"(\d{4}-\d{2}-\d{2})(?![-\d])", v)
+    if not m:
+        return None
+    try:
+        _dt.date.fromisoformat(m.group(1))
+    except ValueError:
+        return None
+    return m.group(1)
+
+
 def derive_keywords(fm: dict, limit: int = 6) -> list:
     raw = fm.get("tags", "")
     raw = raw.strip().strip("[]")
@@ -142,7 +176,144 @@ def derive_keywords(fm: dict, limit: int = 6) -> list:
     return out[:limit]
 
 
-def plan(anchor: Path) -> dict:
+def ledger_harnesses(anchor: Path) -> list:
+    """The distinct `harness` values `migrated.jsonl` recorded at this anchor.
+
+    `migrate-om-store.sh append_ledger` writes one
+    `{"harness": "<kind>", "at": ..., "machine": ...}` row per store it copies,
+    and that is the ONLY surviving record of where a staged wiki page came
+    from: the pages land flat in `community/wiki/` and the `.omx/` they came
+    out of is gone by the time anyone converts them. Order preserved, deduped.
+
+    Advisory input to a `--harness` default, never an inference. "Derive it
+    from the legacy store directory" is right for a single-store anchor and
+    measurably wrong elsewhere: the vault anchor records five distinct kinds,
+    and the `ksm-MS-7E01` workspace anchor records two that BOTH shipped wiki
+    pages (`.omd` -> decision/001, `.omp` -> 002/003). That is why the
+    multi-kind case refuses instead of picking one.
+    """
+    ledger = anchor / HQ_ROOT / "config" / "migrated.jsonl"
+    out: list = []
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            k = json.loads(line).get("harness")
+        except ValueError:
+            continue              # a hand-edited row is not a reason to fail
+        if k and k not in out:
+            out.append(k)
+    return out
+
+
+def resolve_harness(anchor: Path, override):
+    """The harness to stamp on every converted page, or a refusal.
+
+    A wiki page never carried a `harness:` field -- the field REPLACED the
+    per-harness directory the pages used to live in (store-spec §1), so it is
+    born at conversion time and there is nowhere else to read it from. It was
+    silently dropped instead: `post_new(harness=e.get("harness", "omo"))`
+    passed None, because `dict.get` returns a stored None rather than its
+    default, and 300 posts reached disk with no harness line at all. `hq query
+    --harness omx` then answered `{"posts": []}` on the store holding all 300
+    (ksm-MS-7E01, 2026-09-01).
+
+    Required rather than defaulted, for the reason `post_new` now refuses a
+    falsy one: defaulting to "omo" would have stamped 300 omx posts omo, and a
+    wrong harness is worse than a missing one because it looks answered.
+    """
+    if override:
+        return override
+    kinds = ledger_harnesses(anchor)
+    if len(kinds) == 1:
+        return kinds[0]
+    if not kinds:
+        raise SystemExit(
+            "--harness is required: this anchor has no migrated.jsonl to derive it "
+            "from. Pass the harness whose wiki these pages are."
+        )
+    raise SystemExit(
+        f"--harness is required: this anchor's migrated.jsonl records {len(kinds)} "
+        f"harnesses ({', '.join(kinds)}), and a flat community/wiki/ cannot say which "
+        f"page came from which. Convert one harness's pages at a time."
+    )
+
+
+def write_idmap(anchor: Path, plan_path: Path, pairs: list) -> tuple:
+    """Persist old-page -> new-id beside the plan, and never shrink it.
+
+    Three key forms per page, because a citation is written by a human and does
+    not agree with itself about which one it uses: the store-relative path
+    (`convention/a.md`), the bare filename (`a.md` -- what `links:` actually
+    holds), and the stem (`a` -- what prose uses). A form two pages would share
+    is DROPPED rather than aliased: `convention/a.md` and `debugging/a.md` both
+    claim `a.md`, and silently keeping the last one resolves a citation to the
+    WRONG post, which is worse than not resolving it. The dropped forms are
+    listed, so the ambiguity is visible rather than absent.
+
+    Merged with whatever the file already holds. `apply` is documented as
+    "rerun with --commit", and on that rerun every page lands in `skipped`; a
+    rebuild from `created` alone overwrote a complete map with `{}` and then
+    deleted the sources. The same merge makes an interrupted run resumable.
+    """
+    idmap = plan_path.with_suffix(plan_path.suffix + ".idmap.json")
+    prior, prior_ambiguous = {}, []
+    if idmap.exists():
+        try:
+            old = json.loads(idmap.read_text(encoding="utf-8"))
+            prior = dict(old.get("map") or {})
+            prior_ambiguous = list(old.get("ambiguous") or [])
+        except (OSError, ValueError, AttributeError, TypeError):
+            # A corrupt or non-file map is not permission to write a smaller
+            # one over it -- this is the only record of the citation join.
+            raise SystemExit(f"{idmap} exists and is not a readable idmap — move "
+                             "it aside before rerunning; refusing to overwrite it")
+
+    claims: dict = {}
+    for path, pid in pairs:
+        for key in (path, Path(path).name, Path(path).stem):
+            claims.setdefault(key, set()).add(pid)
+    fresh = {k: next(iter(v)) for k, v in claims.items() if len(v) == 1}
+    ambiguous = sorted(set(prior_ambiguous) | {k for k, v in claims.items() if len(v) > 1})
+    merged = {**prior, **fresh}
+    for k in ambiguous:
+        merged.pop(k, None)
+
+    try:
+        anchor_id = parse_anchor(anchor / ANCHOR_REL)
+    except (HqError, OSError):
+        anchor_id = None      # no readable anchor file; plain ids still join locally
+
+    payload = json.dumps({
+        "anchor": str(anchor), "anchor_id": anchor_id,
+        "map": merged, "ambiguous": ambiguous,
+    }, ensure_ascii=False, indent=2)
+    # Atomic, and loud. A partial map reads exactly like a complete one, and
+    # this runs before the `git rm` precisely so a failure here still has pages.
+    tmp = idmap.with_suffix(idmap.suffix + ".tmp")
+    try:
+        tmp.write_text(payload, encoding="utf-8")
+        tmp.replace(idmap)
+    except OSError as e:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise SystemExit(f"cannot write {idmap} ({e.strerror}) — refusing to continue: "
+                         "the conversion would remove the pages and leave their "
+                         "citations with nothing to resolve against")
+    if ambiguous:
+        print(f"idmap: {len(ambiguous)} ambiguous key(s) dropped (two pages claim "
+              f"them): {', '.join(ambiguous[:5])}" + (" …" if len(ambiguous) > 5 else ""))
+    return idmap, len(merged)
+
+
+def plan(anchor: Path, harness: str) -> dict:
     wiki = community_dir(anchor) / "wiki"
     if not wiki.is_dir():
         raise SystemExit(f"no wiki tree at {wiki} — nothing to convert")
@@ -160,24 +331,43 @@ def plan(anchor: Path) -> dict:
             # `git rm`ed it without converting it. Nested ones go through the
             # normal path and need the same judgment fields as any other page.
             pass
-        # The category axis is the immediate parent directory. A page sitting
-        # directly in wiki/ has none -- omp's store is flat by construction
-        # (`omp_content_audit.lint_wiki` globs `wiki/*.md`), so this is a real
-        # shape, not a malformed one, and `topic` is then a judgment call too.
+        fm, body = parse_page(page)
+        # The category axis is the immediate parent directory, and a page with
+        # no parent directory may still carry that same axis as a field. omp's
+        # store is flat by construction (`omp_content_audit.lint_wiki` globs
+        # `wiki/*.md`) and has no such field; omx's is flat AND has one. On the
+        # 300-page albc store all 7 distinct `category:` values were already
+        # valid TOPICS, 0 unmappable (ksm-MS-7E01, 2026-09-01) -- and `plan`
+        # emitted `topic: null` for all 300 while the answer sat unread in
+        # `kept_fields`. That is the `confidence` defect below a second time:
+        # the tool HELD the value and wrote none. Directory first, so a filed
+        # tree still wins over a field that disagrees with it.
+        topic_src = "directory"
         topic = rel.parts[0] if len(rel.parts) > 1 else None
+        if topic is None and fm.get("category"):
+            topic, topic_src = _unquote(fm["category"]), "frontmatter category:"
         if topic is not None and topic not in TOPICS:
             refusals.append({
                 "path": str(rel),
-                "reason": f"wiki category {topic!r} has no hq topic; TOPICS={list(TOPICS)}",
+                "reason": f"wiki category {topic!r} ({topic_src}) has no hq topic; "
+                          f"TOPICS={list(TOPICS)}",
             })
             continue
-        fm, body = parse_page(page)
         h1 = find_h1(body)
         text = page.read_text(encoding="utf-8")
         entries.append({
             "path": str(rel),
             "topic": topic,
-            "date": fm.get("date"),
+            # `created:` is the same fact under the name omx's writer used. 65
+            # of 300 pages reached the undated refusal with no `date:` and no
+            # derivable `verified:` while carrying `created:` all along -- and
+            # `derive_verified` scans the whole file INCLUDING frontmatter, so
+            # a bare `created: YYYY-MM-DD` was never one of those 65. What is,
+            # is a TIMESTAMP: `_ISO`'s trailing `\b` fails on the `T` in
+            # `2026-07-04T13:22:11Z`, so the date is right there and invisible.
+            # Hence the leading-day slice rather than the raw value -- `date:`
+            # is `YYYY-MM-DD` per store-spec §4 and a timestamp is not one.
+            "date": _leading_day(fm.get("date")) or _leading_day(fm.get("created")),
             "verified": derive_verified(text),
             "keywords": derive_keywords(fm),
             "dropped_fields": sorted(set(fm) & DROP_FIELDS),
@@ -192,7 +382,14 @@ def plan(anchor: Path) -> dict:
             "status": fm.get("status"),
             "summary": fm.get("summary"),
             "project": fm.get("project"),
-            "harness": fm.get("harness"),
+            # The page's own value wins where it has one -- a store that grew
+            # the field mid-life keeps it -- and `--harness` fills the rest.
+            # `or`, not `fm.get("harness", harness)`: the key can be PRESENT
+            # and None (a `harness:` line with nothing after it parses to an
+            # empty string, and a plan hand-edited to null parses to None),
+            # and `dict.get`'s default does not fire on either. That exact
+            # distinction is the defect this whole path exists to close.
+            "harness": fm.get("harness") or harness,
             "kept_fields": {k: v for k, v in fm.items()
                             if k not in DROP_FIELDS
                             and k not in ("title", "tags", "date", "confidence",
@@ -291,12 +488,17 @@ def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
     # chain heads per subject. A subject with a head is the store saying "this
     # page is already converted", which also makes a run interrupted halfway
     # resumable instead of destructive.
-    existing_subjects = {p.subject for p in list_posts(anchor) if p.subject}
+    # subject -> id, not just the subject set: a page skipped as already
+    # converted still has a post, and the idmap that replaces its dangling
+    # citations needs that id. Building only the set is what made the
+    # documented `apply` then `apply --commit` rerun write `"map": {}`.
+    posts_by_subject = {p.subject: p.id for p in list_posts(anchor) if p.subject}
+    existing_subjects = set(posts_by_subject)
 
     created, skipped, created_paths = [], [], []
     for e in entries:
         if e["subject"] in existing_subjects:
-            skipped.append(e["path"])
+            skipped.append((e["path"], posts_by_subject[e["subject"]]))
             print(f"{e['path']} -> already converted (subject {e['subject']!r}), skipped")
             continue
         page = wiki / e["path"]
@@ -308,7 +510,7 @@ def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
             anchor, category=e["category"], title=e["title"],
             author="wiki-form-conversion",
             summary=e.get("summary") or e["title"],
-            body=body, harness=e.get("harness", "omo"),
+            body=body, harness=e.get("harness"),
             subject=e["subject"], topic=e["topic"],
             confidence=e.get("confidence") or "none",
             status=e.get("status") or "none",
@@ -327,11 +529,20 @@ def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
 
     # Only pages that are now IN the store get removed -- a page skipped for a
     # reason other than "already converted" must not be deleted along with them.
-    converted = {p for p, _ in created} | set(skipped)
+    converted = {p for p, _ in created} | {p for p, _ in skipped}
     removed = [str(wiki / e["path"]) for e in entries if e["path"] in converted] + \
               [str(wiki / d["path"]) for d in data.get("drops", [])]
     if skipped:
         print(f"\n{len(skipped)} page(s) were already converted and were not re-created")
+
+    # BEFORE `git rm`, not after. `links:` and `sources:` cite other pages by
+    # OLD FILENAME, so the citation graph between converted pages is what a
+    # conversion costs unless this join survives -- and a map written after the
+    # deletion is a map that an unwritable directory or a full disk turns into
+    # deleted sources, a live post, and no way back.
+    idmap_path, idmap_n = write_idmap(anchor, plan_path, created + skipped)
+    print(f"idmap: {idmap_path} — {idmap_n} page(s)")
+
     if commit:
         # `--ignore-unmatch` because a page can be untracked (written this
         # session, or in a store whose `wiki/` was never added). Plain `git rm`
@@ -349,8 +560,13 @@ def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
         # Stage the posts too. `git rm` stages only the deletions, so a commit
         # made right after recorded the originals disappearing and nothing
         # arriving -- the posts sat untracked under `?? .hq/community/`.
+        # The idmap is staged too when it lives inside the anchor: it is the
+        # ONLY record of the citation join once the pages are gone, and a
+        # commit made right after this used to record their deletion while
+        # leaving the map untracked beside it.
         made = sorted({str(Path(res).parent) for _, res in created_paths} |
-                      {str(community_dir(anchor) / "INDEX.md")})
+                      {str(community_dir(anchor) / "INDEX.md")} |
+                      ({str(idmap_path)} if idmap_path.is_relative_to(anchor) else set()))
         a = subprocess.run(["git", "add", "--", *made], cwd=anchor,
                            capture_output=True, text=True)
         if a.returncode != 0:
@@ -384,6 +600,7 @@ def apply(anchor: Path, plan_path: Path, commit: bool) -> int:
                 print(f"note: {wiki} kept ({e.strerror}) — something else is in it")
     else:
         print(f"\n{len(removed)} page(s) left in place — rerun with --commit to `git rm` them")
+
     return 0
 
 
@@ -393,6 +610,10 @@ def main(argv=None) -> int:
     p = sub.add_parser("plan")
     p.add_argument("anchor")
     p.add_argument("--out", default=None)
+    p.add_argument("--harness", default=None,
+                   help="harness to stamp on every converted page; derived from the "
+                        "anchor's migrated.jsonl when it records exactly one, and "
+                        "required otherwise (a page carrying its own wins either way)")
     a = sub.add_parser("apply")
     a.add_argument("anchor")
     a.add_argument("--plan", required=True)
@@ -403,7 +624,8 @@ def main(argv=None) -> int:
     anchor = Path(args.anchor).resolve()
     try:
         if args.verb == "plan":
-            out = json.dumps(plan(anchor), ensure_ascii=False, indent=2)
+            harness = resolve_harness(anchor, args.harness)
+            out = json.dumps(plan(anchor, harness), ensure_ascii=False, indent=2)
             if args.out:
                 Path(args.out).write_text(out + "\n", encoding="utf-8")
                 print(f"wrote {args.out}")

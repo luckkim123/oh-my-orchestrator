@@ -166,6 +166,23 @@ anchor root's `.gitattributes` is:
 .hq/config/project/secretary/journal/*.md   merge=union
 ```
 
+**All three lines are written by `migrate-om-store.sh apply`** (claudebase, 2026-09-01),
+and until then nothing wrote any of them: `audit` had checked for them since 2026-08-31
+while both blocks stayed prose that an operator copied by hand. What that cost, measured
+on `ksm-MS-7E01`: the `albc` anchor was seeded by a migration, got the `migrated.jsonl`
+line and neither of the other two, and six hours later omp's secretary wrote its first
+`session_end` stub into `config/project/secretary/` — an undeclared append-only tracked
+path, the exact add/add setup this rule exists to prevent.
+
+**Auditing at apply time would not have caught it, and that is why the fix is a write.**
+`run_audit` probes the secretary pair only when `config/project/secretary/` already
+exists, and on a fresh anchor it does not — so the audit passes *vacuously* and the
+anchor is wrong hours later, once the writer arrives. A check whose subject has not been
+created yet cannot be the binding layer. The seed is therefore unconditional (a
+`merge=union` rule for a path that does not exist yet is inert) and additive: a line
+already in effect is left alone, judged by `check-attr`/`check-ignore` rather than by
+grepping for its text, so a rule inherited from a parent file counts.
+
 `ledger.jsonl` is hook-owned session state and by §3's layer rules belongs in `runtime/`;
 it sits in `config/` because that is where `omp_paths.py` computes the secretary
 directory. Union merge contains the conflict — it does not make the placement right, and
@@ -214,6 +231,21 @@ leaked secret is unrecoverable; a tracked file rewritten every turn makes the re
 permanently dirty and conflicts across machines; a regenerable artifact in git is dead
 weight forever; a config file a human cannot find is an annoyance; a human record in the
 wrong layer is merely untidy.
+
+### ④ asks whether a verb *can* regenerate it — from files that survive a clone
+
+The honest test is not "is this reproducible in principle", it is "is it reproducible
+from what a fresh clone contains". A file whose regeneration depends on an input in an
+**ignored** layer is not regenerable to anyone but the machine that made it, and
+demoting it to `work/` loses the artifact *and* the means to rebuild it.
+
+Measured on `ksm-MS-7E01`, 2026-09-01: 2.2 MB of `.pt` weights sit in the tracked
+`community/programs/koopman-lifting/step3_modules/`, and the ordering above sends them
+to `work/` — ④ beats ②, and the refit is genuinely deterministic (`fit_report.json`
+records every argument and `seed: 0`). Its input lives under `experiments/`, which is
+gitignored. So the weights stayed, recorded as a HUB decision with the condition that
+would reverse it: if the input ever lands in a tracked layer, ④ applies again and they
+move.
 
 ### ⑤ has two conditions, and both must hold
 
@@ -389,6 +421,11 @@ Measured on `stonefish_ws`, 2026-08-31: an anchor seeded from the two-line versi
 this block put `.hq/community/.hq-lock` straight into `git status`. A file the spec
 itself calls machine-local is the last thing that should arrive as a tracked file.
 
+**These four lines are written by `migrate-om-store.sh apply`** (claudebase,
+2026-09-01), for the reason §2 gives about its own block: the `stonefish_ws` anchor
+seeded from the two-line version of this block is what a hand-copied spec block looks
+like, and no amount of correcting the prose reaches an anchor that was already created.
+
 **The per-harness legacy ignore lines are gone (§9.4), and so are the legacy stores they
 guarded.** `oms` dropped `.oms/`, `omd` dropped `.omd/`, `omha` dropped
 `.omha/redact-patterns.txt`, `omx` dropped `.omx/`; `omp` and `omo` never had one of
@@ -400,6 +437,20 @@ theirs with the stage-3 purge itself (`claudebase` `ed36266`, vault `e746ea3c`, 
 purge leaks the about-to-be-deleted legacy directory into git the moment anything touches
 it. **On every other machine the legacy stores are still on disk and those lines stay**
 until that machine runs its own purge.
+
+**That order now has a reporter, because prose did not enforce it.** `purge` finishes by
+listing every *tracked* file that still names the store it just deleted — the leftover
+ignore rules, and equally the documentation that sends the next reader to a dead path.
+Measured on `ksm-MS-7E01`, 2026-09-01: the purge ran and three `.omx/` ignore rules
+stayed, alongside ten sites across `CLAUDE.md` and `.claude/rules/*.md` naming
+`.omx/programs/`, `.omx/registry/findings/` and `.omx/profile/` — in a round whose
+migration commit had edited `CLAUDE.md` and missed every one of them. `audit` catches
+neither and correctly so: it checks positive assertions ("this path must be
+ignored/tracked/union") and a rule guarding a path that no longer exists violates none
+of them. One list rather than two scanners, because "what still names the dead path" is
+the same question in a `.gitignore` and in a `README`. It **reports and never edits** —
+what replaces a dead documentation path is a judgment, and a wrong automatic rewrite is
+worse than a printed list.
 
 ### The tracked/ignored boundary shift for three repos
 
@@ -497,12 +548,45 @@ root (claudebase `migrate-om-store.sh`, 2026-08-31).
 `community/wiki/`.** That directory is a staging state with one exit (§9.3), so the same
 tool now names it: a run that moves any page there prints the page count, the word
 STAGING, and the `convert-wiki-form.py` command, on stderr beside the anchor warning
-above. `conflict=0 fail=0` describes the copy, never the migration.
+above. `conflict=0 fail=0` describes the copy, never the migration. That command needs
+`--harness <kind>`; §9.3.1 says why the conversion cannot find that value on its own.
+
+**The third thing an operator reads as "done" is an anchor with no omo payload.**
+`community/rules/` + `HUB.md` are what make a vendor a worker under this project's rules
+rather than "a stranger who happens to answer questions" (omo `shared-context.md`), and
+`audit` is blind to them because they are not a git-config question. Both anchors
+migrated on `ksm-MS-7E01` (2026-09-01) had neither, after a migration and purge that
+every automated layer reported clean. `apply` now prints the `bin/omo-init` offer when
+`community/rules/` is empty — **offered, never seeded**, which is omo's own rule for the
+same finding ("do not seed silently and do not proceed silently; the user decides"). The
+detector and the fixer both already shipped; nothing connected either to this path,
+because omo's census hook fires only on a prompt containing `/omo` and a migration
+session has no reason to type one.
 
 The tool is `claudebase` `runtime/bin/migrate-om-store.sh` (P5, 2026-08-28) — dry-run by
 default, `apply` copies and sha256-verifies without deleting, `reverse` merges new-store
 writes back to the legacy path, and `purge` reads its confirmation from `/dev/tty` so a
-piped or closed stdin refuses. §9.3 below is its mapping table; a path no row claims
+piped or closed stdin refuses. **A session with no controlling terminal cannot pass that
+prompt** — `purge` answers `no terminal to confirm on — refusing`, which is what an agent
+shelling out through a captured pipe meets.
+
+⚠️ **That is not a gate against automation, and an earlier draft of this section said it
+was.** The check is `[ -r /dev/tty ]` and nothing more (`migrate-om-store.sh:664`): a
+process running inside a PTY — a tmux pane, an Orca terminal, an agent with a pty
+allocated — reads and writes `/dev/tty` like any other and types the confirmation string
+as easily as a person. What the check blocks is a piped or closed stdin: it guards against
+an *accident*, not against an *agent*. An operator who wants the purge from a
+pipe-attached session moves the legacy store to the tool's own destination
+(`~/.claude/hq-purged/<anchor>-<store>-<ts>`) by hand instead.
+
+**The order is: create the anchor FIRST, convert the staged wiki SECOND.** The two
+messages an operator meets say the opposite to each other, and only one of them is
+binding. `hq.store.community_dir()` resolves `community/` through `.hq/.anchor`, so
+`convert-wiki-form.py` cannot find the staged pages at all until the anchor exists —
+while `migrate-om-store.sh` warns "do not create `.hq/.anchor` yet" whenever pages
+remain in staging. That warning is **advisory**: it guards against calling an anchor
+finished, not against creating one, and the anchor is an operator action either way. So:
+anchor, convert, then treat the anchor as finished. §9.3 below is its mapping table; a path no row claims
 exits 2 rather than being skipped.
 
 **The decision to advance an anchor past stage 1 belongs to the user, not to a script.**
@@ -580,6 +664,13 @@ three real anchors at depths 7–8):
 find ~ -type d \( -name '.omp' -o -name '.oms' -o -name '.omd' -o -name '.omx' \
   -o -name '.omha' -o -name '.orchestration' \) -not -path '*/.git/*' 2>/dev/null
 ```
+
+**That `~` is a real bound, and it reads as a zero rather than as an error.** An anchor
+outside `$HOME` — the common case for a container whose work tree is mounted at
+`/workspace` — is simply not in the roster, and `census` says `in scope: 0` with no
+diagnostic. Pass `--root` (or widen the `find`) whenever the machine's anchors do not
+live under the home directory; measured on `ksm-MS-7E01`, 2026-09-01, where both real
+anchors were under `/workspace` and the default census saw neither.
 
 Run 2026-08-27 on `ksm-mac`: **29 hits — 23 in scope, 6 excluded.** Census (the roster)
 and drift (split-brain detection) use **different instruments on purpose**: census is
@@ -680,7 +771,7 @@ read-path updates.
 | `STRUCTURE.md` · `DATASETS.md` | `config/project/` | ②③ tie, ③ wins (`omp_content_audit.py:113`) |
 | `learned.md` | `config/project/` | ③ (`omp_content_audit.py:201`) |
 | `PROJECT.md` · `NAMING.md` · `CONVENTIONS.md` | `community/` | ② — prompt strings only, no parser |
-| `wiki/*.md` | `community/wiki/` **(staging only)** | ② — **the wiki FORM is retired (r7, 2026-08-30); this row is the file MOVE, which cannot retire it.** `migrate-om-store.sh` moves files and cannot mint the per-page `subject:`/`id:` a post needs, so raw pages still land in `community/wiki/`. That directory is now a **staging state with a single exit**: run omo's `skills/harness/convert-wiki-form.py` (`plan` then `apply`) immediately after, which converts the pages into `community/posts/` and `git rm`s them. An anchor is not finished migrating while `community/wiki/` still has pages in it. ⚠️ omp's tree is FLAT — those pages have no category directory, so `plan` leaves `topic:` null and `apply` REFUSES until a human fills it |
+| `wiki/*.md` | `community/wiki/` **(staging only)** | ② — **the wiki FORM is retired (r7, 2026-08-30); this row is the file MOVE, which cannot retire it.** `migrate-om-store.sh` moves files and cannot mint the per-page `subject:`/`id:` a post needs, so raw pages still land in `community/wiki/`. That directory is now a **staging state with a single exit**: run omo's `skills/harness/convert-wiki-form.py` (`plan` then `apply`) immediately after, which converts the pages into `community/posts/` and `git rm`s them. An anchor is not finished migrating while `community/wiki/` still has pages in it. ⚠️ omp's tree is FLAT — those pages have no category directory, so `plan` falls back to the page's own `category:` frontmatter and, failing that, leaves `topic:` null, where `apply` REFUSES until a human fills it. omp pages carry no such field, so this row is still the refusing case; the fallback exists for omx's flat store, which does |
 | `secretary/ledger.jsonl` | `config/project/` | ⑤(b) fails — it is the history |
 | `secretary/journal/` · `BRIEF.md` · `raid.md` · `todo.txt` · `done.txt` | **community candidate — P6 approval item** | ② by rule; the transition needs a `chronicler` hook revision, so the choice is preserved rather than forced |
 | `env/` | `config/project/` | ③ — the `omp-env` canonical Dockerfile/compose assets (**added P5**: absent from this table until `krit/simulator`'s 7 files were censused) |
@@ -780,6 +871,80 @@ gate", and that deferral was the assignment):
 | `.trash/` | `runtime/experiments/trash/` | ⑤ — `omx clean`'s holding area. **Absent from every censused store**; surfaced by the P7 prose audit, which found `clean.py` resolving it as `paths.omx_dir / ".trash"` unconditionally. It has to move: left at the legacy path, the first `omx clean` after a `--purge` recreates `.omx/` and undoes the purge |
 | `runs/<run_id>/` · `campaigns/<id>/` | `work/experiments/{runs,campaigns}/` | ④ — **whole, not split.** No censused store has either directory, so a per-file split inside them would be invented rather than measured; deferred the way omp's `env/` and omd's `wiki/` were |
 | `.omx/` (the nested self-directory, §9.1 row 5) | `runtime/experiments/nested-omx/` | one real file, a wiki log written by a misrooted `--root .../.omx` call. Mapped rather than skipped (skipping loses it at `--purge`) and rather than made its own anchor (§2's granularity rule does not describe an anchor inside another store) |
+
+### 9.3.1 What the conversion drops — and why a refusal is the tool working
+
+`convert-wiki-form.py` carries a `DROP_FIELDS` list (`sources`, `links`,
+`schemaVersion`, `qualityScore`, `qualityReasons`). **It is lossy by design, and
+the list was derived from a measurement, not from a judgment about the fields:**
+each one was empty or constant on every store censused for §9.3, so it carried
+nothing into the post schema.
+
+That measurement does not hold everywhere. On one omx store 290 of 300 pages
+carried a real `sources:`/`links:` value (`ksm-MS-7E01`, 2026-09-01). The tool
+**refuses** rather than discarding them — `refusing — these pages carry a value
+in a field this tool drops` — and that refusal is the correct behavior, not a
+bug to route around. Silently dropping them is the accident it exists to
+prevent.
+
+What an operator does at that refusal:
+
+- **`sources:` / `qualityScore:` / `qualityReasons:`** — move them into the page
+  body before converting (a `## Provenance` section at the end reads fine and is
+  lossless). They do **not** become post fields: `verified:` is the schema's
+  provenance field, and one store's need does not widen a schema every anchor
+  has to satisfy.
+- **`links:`** — this one points at OTHER PAGES BY OLD FILENAME, and `git rm`
+  makes every such link dangle. `apply` writes `<plan>.idmap.json` beside the
+  plan — three key forms per page (`convention/a.md`, `a.md`, `a`) mapped to
+  `<category>/<NNN>`, plus the `anchor_id` for the `<anchor-id>:<category>/<NNN>`
+  cross-anchor form of §4 — so the citation graph between converted pages
+  survives as a join rather than as prose. **Keep that file.** It is the only
+  record of the mapping once the pages are gone; the conversion used to print it
+  to stdout and let the terminal carry it away.
+
+  Three properties worth knowing before trusting it. A key two pages would both
+  claim (`convention/a.md` and `debugging/a.md` both claim `a.md`) is **dropped,
+  not aliased**, and listed under `ambiguous:` — a citation resolving to the
+  wrong post is worse than one that does not resolve. The file is **merged,
+  never rebuilt**, because the documented `apply` then `apply --commit` rerun
+  puts every page in `skipped`, and a rebuild would write `{}` over a good map
+  and then delete the sources. And it is written **before** the `git rm`, so a
+  failure to write it leaves the pages in place rather than leaving a live post,
+  a deleted source, and no way back.
+
+#### The one field the conversion has to MINT: `harness:`
+
+The opposite problem to `DROP_FIELDS`, and it cost more. `harness:` is the field
+§1 says replaced the per-harness *directory* the pages used to live in, so a
+legacy wiki page never carried one and there is nowhere in the page to read it
+from — it is born at conversion time or it does not exist.
+
+It did not exist. The converter read `fm.get("harness")` (None), handed that to
+`post_new(harness=e.get("harness", "omo"))`, and `dict.get`'s default does not
+fire on a key that is present holding None: `fields["harness"] = None`, and the
+renderer's `if fields.get(k)` dropped the line. **300 of 300 albc posts landed
+with no harness** (`ksm-MS-7E01`, 2026-09-01), after which `hq query --harness
+omx` returned `{"posts": []}` on the store holding every one of them, and `hq
+lint` said `clean` — it validated the vocabulary of the fields present and never
+the presence of one.
+
+Three changes, at three layers, because the defect passed through all three:
+
+- **`plan` takes `--harness <kind>`**, derived from the anchor's
+  `migrated.jsonl` when that records exactly one kind and **required** otherwise.
+  Not derived from the legacy store directory, which is gone by conversion time
+  and would in any case be ambiguous: the vault anchor records five kinds, and
+  the `ksm-MS-7E01` workspace anchor records two that both shipped wiki pages
+  (`.omd` → `decision/001`, `.omp` → `002`/`003`). A page carrying its own value
+  keeps it.
+- **`post_new` refuses a falsy `harness`.** Every writer routes through it, so
+  the guard belongs there rather than in each caller. Refused rather than
+  defaulted: `or "omo"` would have stamped 300 omx posts omo, and a wrong
+  harness is worse than a missing one because it looks answered.
+- **`hq lint` warns, with the count.** A warning rather than an error, since a
+  legacy store mid-migration legitimately holds pre-schema posts; aggregated
+  rather than per-post, because 300 lines is how a finding gets scrolled past.
 
 ### 9.4 `.gitignore` amendments per repo
 
