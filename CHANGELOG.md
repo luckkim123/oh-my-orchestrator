@@ -2,6 +2,245 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.22.0] - 2026-09-01 — the skill was invoked and nothing was required of it
+
+A user on another machine invoked `/oh-my-orchestrator:omo` and wrote "use omo's
+cross model a lot" into the brief. The session measured its preconditions
+correctly — wrapper v0.20.0 against a 0.21.6 cache, and codex, agy and gemini all
+absent — then ran every fan-out (two code sweeps, one deep analysis, twelve-plus
+workers) through native Claude agents. Zero wrapper calls, zero ledger rows, and
+the `.hq/community/` omo layer had never been seeded by any session in that
+workspace, ever. The backend gap reached the user as one line inside one status
+report. The user found the empty store themselves.
+
+**The substitution was the right call.** On a claude-only machine, routing a
+fan-out through the wrapper is a net loss: a round trip you did not need, the
+session's hooks and repo `CLAUDE.md` gone because `backend/claude.go` passes
+`--setting-sources ""`, no loader for the same reason, and `oracle` bound to
+`claude-opus-5` — the same model a native Opus agent would have been. What
+failed was not the routing decision but everything around it, and every
+instruction that would have caught it was prose in `skills/omo/`.
+
+This is the third time this repo has learned that prose is not a binding layer,
+and the second time in two days: 0.21.6 gave the 2-family rule a `PreToolUse`
+hook after an evaluation found it silenced by a session writing "one family is
+enough" into its own plan. The gate for omo's own preconditions did not exist at
+all, so the diagnosis in the incident report — "omo has no binding layer" — was
+half right in the way that matters: the layer is there, wired to seven events,
+and nothing in it was pointed at the session itself.
+
+### Added
+
+- **`skills/harness/hooks/omo-census.py`** — two halves of one contract. On
+  `UserPromptSubmit`, a prompt containing `/omo` triggers a measurement of the
+  wrapper (present? current against the manifest?), the backends on PATH, and
+  whether the store is seeded, injected as
+  `OMO -> wrapper:0.21.6 backends:claude-only store:UNSEEDED(rules/+HUB.md)`. On
+  `PreToolUse`, `Agent`/`Task`/`Edit`/`Write`/`NotebookEdit` are denied until
+  that line has been written **since the injection** — tracked by transcript byte
+  offset, so one acknowledgement at the top of a session does not cover every
+  later turn.
+
+  Injection alone would not have prevented the incident: that session *had* the
+  facts and still did not surface them. The enforcing half is what turns a
+  measurement into a report. `Bash` is deliberately not gated — it already
+  carries `release-family-gate`, the session needs it to run the very checks the
+  census names, and the failure was a fan-out, not a shell command.
+
+  Fails open on everything: no session id, no transcript, an unreadable state
+  file, a missing `_harness_common`, any exception.
+
+- **`bin/omo-init`** — the procedure `shared-context.md` has described in one
+  line ("Seed it from `templates/orchestration/`") since the store was ported,
+  given a name. Seeds the four `community/` layers, installs the vendor loader
+  for every vendor actually on PATH, and builds/installs/symlinks the wrapper.
+  Additive: an existing file is never overwritten without `--force`, and a
+  missing `.hq/` requires `--create`. `--dry-run`, `--wrapper-only`, and
+  `--census-only` for the narrower cases.
+
+- **26 tests** in `skills/harness/tests/test_omo_census.py`, discriminating in
+  both directions — reverting the fail-open reads, ignoring the byte offset, or
+  widening `_INVOCATION_RE` back to `\b` fails four of them. Two defects were
+  caught by writing the tests: the census listed `antigravity` and `gemini` as
+  backends (the first is the *loader* vendor name — the CLI is `agy` — and the
+  second was replaced by agy in 0.20.0, so both would have read MISSING forever
+  on every machine), and the test pinning that list to `registry.go` split on the
+  first `}` in the file, which lands inside `CodexBackend{}` and found exactly
+  one backend while passing.
+
+### Changed
+
+- **`skills/omo/SKILL.md`** — the store check is no longer gated on making a
+  vendor call. It read "before the first vendor call" until now, which is why a
+  session that made none never reached it; a precondition you only check when you
+  are about to use the thing is not a precondition. New **Degraded Mode**
+  section: the honest efficiency argument for substituting native agents, and the
+  three obligations that come with it (a section of its own to the user, a
+  `sessions/<date>-<worker>.md` record, a named ground — a native delegation
+  leaves no ledger row, so that file is the only trace it happened). Two new
+  entries under Forbidden Behaviors. Two channel limits documented, both measured
+  2026-09-01: a subagent result truncates near 4 KB, so a long report is written
+  to a file and its path returned; and a read-only role has no `Write` tool, so
+  the dispatch must name the `Bash` heredoc.
+
+- **`install.sh`** — until now it *printed* two commands and ran neither, and the
+  drift it existed to prevent has recurred three times. It now execs
+  `bin/omo-init --wrapper-only`, which is the missing third step: `make install`
+  writes to `$GOBIN`, and nothing was making the `PATH` symlink.
+
+- **`codeagent-wrapper/Makefile`** — `git describe` does not return something odd
+  outside a git checkout, it *fails*, and a build from the plugin cache is
+  exactly that. The old fallback stamped the literal `dev`, so the fix for a
+  stale binary produced a binary that could no longer report whether it was
+  stale. Falls back to the manifest version instead.
+
+### Fixed before shipping — the two-family adversarial review
+
+**Seventeen defects, and the two families barely overlapped.** codex and agy ran
+the same prompt against the same base in parallel, because this ships in a
+release and that is what opens the gate. agy returned eleven findings and eight
+held; codex returned nine and all nine held. The one place they met, they pointed
+**opposite** directions — agy showed `` `/omo audit` `` failing to fire and codex
+showed a backticked *mention* inside a defect report arming the gate — and the
+resolution came from neither: anchor to the start of a line, which satisfies both.
+That is the gate's own argument, measured a second time (the first was 0.19.0's
+`b781d4a`).
+
+Named individually because each is a property the tests now pin, not a tidy-up.
+
+**From codex (9/9 confirmed):**
+
+1. **Any `OMO ->` substring opened the gate.** An assistant writing "I have not
+   reported it yet; the required prefix is OMO ->" satisfied it with nothing
+   reported — the passing mention this skill forbids in so many words. The
+   acknowledgement is now a whole *line* that carries the arrow and all three
+   field names. Not an exact string match against the injected line: that wedges
+   on a stray space or a code span, and a wedge is the worse failure.
+2. **One non-object transcript row wedged the gate permanently.** A bare `[]`
+   parses fine and then `rec.get` raises, the broad handler returned False, and
+   every retry after it was denied forever. Non-dict rows are skipped and the
+   rows after them still count — the policy `release-family-gate` already applies
+   to its own ledger — and the outer handler now returns True.
+3. **A backticked mention was read as an invocation.** ``the user ran
+   `/oh-my-orchestrator:omo` and it failed`` — a sentence out of the very defect
+   report this change was written from — injected a census and armed the gate for
+   an unrelated review. See the opposite-direction note above.
+4. **A helper that RAISES on import escaped `main()`'s own handler.** The shim
+   caught `ImportError` only, so a `_harness_common.py` with a syntax error or a
+   `RuntimeError` at import exited 1 with a traceback instead of degrading.
+5. **A nested repository seeded its parent's store.** `outer/.hq/` is visible
+   from `outer/inner/`, so `omo-init --project outer/inner` proposed every write
+   into the outer repo. The lookup is now bounded at the target's own git root;
+   an outer anchor stays legitimate reading context and is never a seed target.
+6. **The wrapper install destroyed an existing regular file.** `~/.local/bin/
+   codeagent-wrapper` as a hand-installed binary was unlinked without asking —
+   against this script's own "existing files are never overwritten" claim. A
+   symlink is still replaced silently; a regular file needs `--force`.
+7. **Install failures exited 0**, so `install.sh` reported shell success on a
+   machine with no `go` and nothing installed.
+8. **`$(PLUGIN_JSON)` interpolation broke on a path containing `'`** — a legal
+   path — closing the Python string literal so the fallback silently became `dev`
+   again, the exact state it exists to prevent. Python derives the path from its
+   own cwd now. Verified: a build under `plugin'cache/` stamps `0.22.0`.
+9. **`NO-ANCHOR` had no actionable path** and the guidance named a command that
+   exits 2 for it. Both the hook text and `SKILL.md` now name `--create`, and say
+   why the plain form refuses.
+
+**From agy (8/11 confirmed):**
+
+1. **The gate failed CLOSED on an unreadable transcript.** `acknowledged_since`
+   returned False for a missing or empty `transcript_path`, which reads as "not
+   acknowledged" and denies — and re-emitting the line cannot make an absent file
+   appear, so the session was wedged permanently with no way out. It returns True
+   there now, failing open on the instrument like every other hook in this repo.
+2. **A null offset scanned from zero.** `transcript_size` returned 0 when it
+   could not stat the file, so the next turn accepted an *earlier* turn's
+   acknowledgement — destroying the one property the offset exists for. It
+   returns None now, and None fails open rather than scanning wide.
+3. **`\b` fired on prompts that only NAMED this tooling.** `/omo-init` and
+   `/omo/rules.md` both matched, because `\b` sits between `o` and a hyphen or a
+   slash — so a prompt discussing the change armed the gate. Now `(?![\w/:-])`.
+4. **A backticked invocation did not fire.** `` `/omo audit` `` failed
+   `(?:^|\s)`. Fixing this by accepting a delimiter *anywhere* is what codex's
+   finding 3 then broke, so the shipped form is the line anchor: one opening
+   delimiter is allowed before the slash, and only at the start of a line.
+5. **`store_status` raised on an unreadable store** — an OSError rather than a
+   census, and `omo-init --census-only` calls it directly.
+6. **`install_wrapper` read `GOPATH` and ignored `GOBIN`.** `go install` writes
+   to `$GOBIN` when it is set, so on a machine that sets it the symlink pointed
+   at a path the build never wrote — the exact stale-binary failure this command
+   exists to end.
+7. **The loader was installed beside the shell's cwd, not the store's anchor.**
+   Run from a subpackage, `.codex/` landed in the subpackage while `.hq/` sat at
+   the repo root.
+8. **`bash bin/omo-init`** — in `SKILL.md`, `README.md`, and the hook's own
+   guidance text, against a Python script. Now `python3`.
+
+Three were refuted: the `.hq` literal in `bin/` and `tests/` is outside
+`test_paths_lint.py`'s declared scope (and the lint passes); there is no
+`antigravity` CLI to alias — the binary is `agy` and the README says so; and the
+"transcript not yet flushed when PreToolUse fires" hypothesis is contradicted by
+omha's `route_guard`, which gates on the same mechanism and was observed working
+in the session that wrote this change.
+
+### Verification
+
+30 census tests pass. Each of the three properties the reviews turned up is
+pinned independently: reverting the acknowledgement to a token search fails one,
+removing the non-dict row guard errors one, and widening the invocation anchor
+back to "a delimiter anywhere" fails one. Reverting the two fail-open reads or
+ignoring the byte offset fails four.
+
+Existing suites unchanged and green: `test_hooks.py` 137, `test_hq.py` 47,
+`test_paths_lint.py` 1, and the wrapper's own `go test ./...`. The path lint
+caught the new hook retyping the `.hq` literal, which now comes from
+`_harness_common` like every other hook's.
+
+Live, end to end on this machine:
+
+- the census read `wrapper:0.21.5!=0.21.6(STALE) backends:codex,agy,claude
+  store:UNSEEDED(rules/+HUB.md)` — this repo's own store is the second unseeded
+  one found;
+- `bash install.sh` moved it to `wrapper:0.21.6` in one command;
+- the Makefile fallback stamps `0.22.0` built from a tree with no `.git`, and
+  still `0.22.0` when that tree sits under a directory named `plugin'cache`.
+
+### Notes
+
+Two claims in the incident report did not survive checking, and both changed what
+got built. "omo has no binding layer, everything is skill prose" is false —
+`plugin.json` wires seven hook events including the `PreToolUse` Bash gate added
+in 0.21.6, the very version that session was running — so this is an extension of
+an existing layer, not a new one, at a fraction of the proposed cost. "The version
+string is `dev` because ldflags are not specified" is also false: `Makefile:3`
+has always passed `-X ...app.version=$(git describe ...)`, and `dev` is the
+`app.go:13` fallback reached when the build happens outside a git checkout. The
+proposed fix was right and the stated mechanism was not, which matters because
+the real mechanism is where the fix had to go.
+
+The report's fifth proposal — put the 4 KB channel limit and the heredoc path in
+the **role cards** — was not done there. A vendor role reads its card through the
+wrapper and returns through stdout or `--output`; neither limit applies to it.
+Both belong to the *native* substitution, so they are documented under Degraded
+Mode, which is where a session in that situation is being sent anyway.
+
+The report's third proposal asked for native delegations to be written to "a
+ledger counterpart" alongside their ground. The record obligation is in — a
+`sessions/` file — but it is deliberately **model-written, not hook-written**,
+and the reason is a fact about the payload rather than a preference: **the ground
+is not in it.** A `PreToolUse`/`SubagentStart` hook sees the tool name and its
+arguments and has no way to know which of the four grounds the session decided
+on, so a mechanized row would carry `ground: null` — exactly the blind spot
+0.21.6 closed for vendor calls by adding the `--ground` flag. There is no
+equivalent flag to read on a native dispatch. Mechanizing this needs a channel
+that does not exist yet; inventing one is a larger change than this fix.
+
+Not done: seeding `oh-my-orchestrator`'s own store. Its `.hq/` holds `runtime/`
+and `work/` and no `community/` at all — a second live instance of the same
+defect, found while checking the first — but seeding it adds tracked files to
+this repo and that is the operator's call, not a side effect of a bug fix.
+Run `python3 bin/omo-init` to take it.
+
 ## [0.21.6] - 2026-08-31 — the ledger knew the cost and never the reason
 
 `SKILL.md:375` has forbidden delegating without naming one of four grounds since

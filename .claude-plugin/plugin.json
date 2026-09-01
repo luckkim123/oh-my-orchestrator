@@ -1,6 +1,6 @@
 {
   "name": "oh-my-orchestrator",
-  "version": "0.21.6",
+  "version": "0.22.0",
   "description": "Multi-vendor orchestration harness. The Claude session executes; vendor CLIs advise by role on a tracked .hq/community/ board with enforcement on SubagentStop.",
   "author": {
     "name": "kimseungmin"
@@ -23,6 +23,17 @@
     "./skills/community/"
   ],
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/harness/hooks/omo-census.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -30,6 +41,16 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/harness/hooks/release-family-gate.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Agent|Task|Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/harness/hooks/omo-census.py\"",
             "timeout": 5
           }
         ]

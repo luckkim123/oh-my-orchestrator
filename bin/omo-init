@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""Seed the community store, install the vendor loaders, report the census.
+
+`shared-context.md` has said "Seed it from `templates/orchestration/`" since the
+store was ported, and `SKILL.md` only ever told a session to CHECK the store
+"before the first vendor call". Both are true and together they leave a hole the
+2026-09-01 stonefish_ws incident fell straight through: a session that makes zero
+vendor calls never reaches the check, so the store is never even looked at, let
+alone seeded. Measured the same day: `oh-my-orchestrator`'s own repo had a `.hq/`
+with `runtime/` and `work/` and no `community/` at all.
+
+A procedure written in a reference file is a procedure nobody runs. This is the
+same procedure with a name.
+
+  omo-init                    seed + install loaders + census, in an existing .hq/
+  omo-init --create           also create the .hq/ if there is none
+  omo-init --dry-run          say what would change, touch nothing
+  omo-init --wrapper-only     just build/install/symlink codeagent-wrapper
+  omo-init --census-only      just print the census line
+
+Existing files are never overwritten. Seeding is additive by construction, so
+running this twice is safe and the second run is a census.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+TEMPLATES = REPO / "templates" / "orchestration"
+
+
+def _census_module():
+    """Import the hook as a module -- its filename has a hyphen, so no plain import.
+
+    The census lives in the hook because the hook is the layer that must run it
+    unprompted. Re-deriving it here would be a second definition of "is this
+    machine ready", and two definitions drift."""
+    path = REPO / "skills" / "harness" / "hooks" / "omo-census.py"
+    spec = importlib.util.spec_from_file_location("omo_census", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def find_store(start: Path, hq_root: str, ceiling: Path = None):
+    """Nearest store at or above `start`, never crossing above `ceiling`.
+
+    The ceiling is the target's own repository root, and it exists because
+    without it a nested repo seeded its PARENT's store: `outer/.hq/` is visible
+    from `outer/inner/`, so `omo-init --project outer/inner` proposed every
+    write into the outer repo (codex, 2026-09-01). An outer anchor is legitimate
+    *reading* context and never a local seed target.
+    """
+    for d in [start] + list(start.parents):
+        if (d / hq_root).is_dir():
+            return d / hq_root
+        if ceiling is not None and d == ceiling:
+            return None
+    return None
+
+
+def git_toplevel(start: Path):
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return Path(out.stdout.strip())
+    except Exception:
+        pass
+    return None
+
+
+def seed(hq: Path, dry: bool, force: bool) -> list:
+    """Create the four community layers store-spec.md §3 names. Additive only."""
+    actions = []
+    community = hq / "community"
+
+    def put(dst: Path, src: Path):
+        if dst.exists() and not force:
+            return
+        actions.append(f"write {dst}")
+        if dry:
+            return
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+
+    for rule in sorted((TEMPLATES / "rules").glob("*.md")):
+        put(community / "rules" / rule.name, rule)
+    hub = TEMPLATES / "HUB.md"
+    if hub.is_file():
+        put(community / "HUB.md", hub)
+
+    # agents/ and sessions/ hold records humans write; templates cannot seed
+    # their content, only their existence.
+    for d in (community / "agents", community / "sessions"):
+        if not d.is_dir():
+            actions.append(f"mkdir {d}")
+            if not dry:
+                d.mkdir(parents=True, exist_ok=True)
+                (d / ".gitkeep").touch()
+    return actions
+
+
+def install_loaders(project: Path, dry: bool) -> list:
+    """Only for vendors actually on PATH -- a loader for an absent CLI is litter."""
+    actions = []
+    script = REPO / "install_vendor_context.py"
+    for vendor, cli in (("codex", "codex"), ("antigravity", "agy")):
+        if not shutil.which(cli):
+            actions.append(f"skip {vendor} loader ({cli} not on PATH)")
+            continue
+        cmd = [sys.executable, str(script), "--vendor", vendor, "--project", str(project)]
+        if dry:
+            cmd.append("--dry-run")
+        actions.append("$ " + " ".join(cmd))
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        actions.append((r.stdout + r.stderr).strip() or f"(exit {r.returncode})")
+        if r.returncode != 0:
+            actions.append(f"FAILED: {vendor} loader install exited {r.returncode}")
+    return actions
+
+
+def install_wrapper(dry: bool, force: bool = False) -> list:
+    """Build, install, and -- the step that has been prose since 0.20.0 -- symlink.
+
+    `install.sh` printed these two commands and ran neither, and the version
+    drift it was supposed to prevent has now recurred three times. The symlink
+    (not a copy) is what makes the NEXT `make install` live with no second step.
+    """
+    actions = []
+    if not shutil.which("go"):
+        return ["FAILED: go not on PATH -- cannot build codeagent-wrapper"]
+    cmd = ["make", "-C", str(REPO / "codeagent-wrapper"), "install"]
+    actions.append("$ " + " ".join(cmd))
+    if not dry:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        actions.append((r.stdout + r.stderr).strip()[-2000:])
+        if r.returncode != 0:
+            return actions + [f"FAILED: make install exited {r.returncode}"]
+    # GOBIN first. `go install` writes to $GOBIN when it is set and only falls
+    # back to $GOPATH/bin otherwise, so reading GOPATH alone symlinks a path the
+    # build never wrote -- leaving ~/.local/bin pointing at a stale binary or
+    # nothing, which is the exact failure class this command exists to end
+    # (agy, 2026-09-01).
+    try:
+        gobin = subprocess.run(["go", "env", "GOBIN"], capture_output=True, text=True,
+                               timeout=10).stdout.strip()
+        gopath = subprocess.run(["go", "env", "GOPATH"], capture_output=True, text=True,
+                                timeout=10).stdout.strip()
+    except Exception:
+        return actions + ["FAILED: could not read `go env GOBIN/GOPATH`"]
+    bindir = Path(gobin) if gobin else Path(gopath) / "bin"
+    src = bindir / "codeagent-wrapper"
+    dst = Path.home() / ".local" / "bin" / "codeagent-wrapper"
+    actions.append(f"symlink {dst} -> {src}")
+    if not dry:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        # A REGULAR file here is somebody's hand-installed binary, and unlinking
+        # it destroyed it without asking (codex, 2026-09-01) -- against this
+        # script's own "existing files are never overwritten" claim. Replacing a
+        # symlink is the operation this command is for and stays automatic.
+        if dst.is_symlink():
+            dst.unlink()
+        elif dst.exists():
+            if not force:
+                return actions + [
+                    f"FAILED: {dst} is a regular file, not a symlink. Move it "
+                    "aside, or re-run with --force to replace it."]
+            dst.unlink()
+        dst.symlink_to(src)
+        if str(dst.parent) not in os.environ.get("PATH", "").split(os.pathsep):
+            actions.append(f"WARNING: {dst.parent} is not on PATH -- add it, or the "
+                           "stale binary somewhere else on PATH still answers")
+    return actions
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="omo-init")
+    ap.add_argument("--project", default=".", help="project root (default: cwd)")
+    ap.add_argument("--create", action="store_true", help="create .hq/ if absent")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true", help="overwrite seeded rule files")
+    ap.add_argument("--wrapper-only", action="store_true")
+    ap.add_argument("--census-only", action="store_true")
+    a = ap.parse_args(argv)
+
+    project = Path(a.project).resolve()
+    census = _census_module()
+    hq_root = census.hc.HQ_ROOT if census.hc else ".hq"
+
+    if a.census_only:
+        print(census.census_line(project))
+        return 0
+
+    root = git_toplevel(project) or project
+    out = []
+    if a.wrapper_only:
+        out += install_wrapper(a.dry_run, a.force)
+    else:
+        hq = find_store(project, hq_root, ceiling=root)
+        if hq is None:
+            if not a.create:
+                print(f"no {hq_root}/ at or above {project}.\n"
+                      f"  re-run with --create to make one at {root}/{hq_root}/", file=sys.stderr)
+                return 2
+            hq = root / hq_root
+            out.append(f"mkdir {hq}")
+            if not a.dry_run:
+                hq.mkdir(parents=True, exist_ok=True)
+        out += seed(hq, a.dry_run, a.force)
+        # The loader belongs beside the store's anchor, not beside the shell's
+        # cwd: run from a subpackage and the first version wrote `.codex/` into
+        # the subpackage while `.hq/` sat at the repo root (agy, 2026-09-01).
+        out += install_loaders(hq.parent, a.dry_run)
+        out += install_wrapper(a.dry_run, a.force)
+
+    for line in out:
+        print(line)
+    print()
+    print(census.census_line(project))
+    if a.dry_run:
+        print("(--dry-run: nothing was written)")
+    # A nonzero exit, so `install.sh` does not report shell success on a machine
+    # where nothing was installed (codex, 2026-09-01).
+    failed = [l for l in out if str(l).startswith("FAILED:")]
+    if failed:
+        print(f"\n{len(failed)} step(s) failed.", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

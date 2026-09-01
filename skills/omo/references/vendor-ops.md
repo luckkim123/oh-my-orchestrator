@@ -290,8 +290,10 @@ The `gemini` and `opencode` backends are gone as of 0.20.0 — `Select()` had
 rejected both since D24, and the deferred sweep deleted their code, parser
 branches, stderr patterns, and tests. `install.sh` no longer downloads the
 upstream binary either (it used to fetch a `stellarlinkco/myclaude` build with
-no `agy` backend that overwrote a local one); it now refuses and points at
-`make install`. The wrapper exists only where someone built it from this tree.
+no `agy` backend that overwrote a local one). From 0.21.6 to 0.22.0 it refused
+and printed `make install`; since 0.22.0 it *runs* the install — build, `$GOBIN`,
+and the `PATH` symlink — because a printed instruction is not an installer and
+the version drift recurred a third time while it was one. The wrapper exists only where someone built it from this tree.
 The multimodal and long-context work the lane table hands to a Google-family
 vendor goes through `agy`; without it, `claude` carries it.
 

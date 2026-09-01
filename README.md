@@ -77,15 +77,22 @@ do not update without the bump.
 **2. The wrapper** — built from source, no binary is downloaded:
 
 ```bash
-cd codeagent-wrapper && make build && make install   # installs to $GOBIN (default ~/go/bin)
-ln -sf "$(go env GOPATH)/bin/codeagent-wrapper" ~/.local/bin/codeagent-wrapper
-codeagent-wrapper --version   # must match the top of CHANGELOG.md
+bash install.sh        # build + install to $GOBIN + symlink into ~/.local/bin, then census
 ```
 
-`$GOBIN` is frequently not on `PATH`. The symlink keeps every future
-`make install` live with no second step — without it, a stale hand-copied
-build can shadow the fresh one while every existence check passes (the
-0.19.1 incident).
+That is one command because it was three prose steps until 0.22.0 and the
+drift they existed to prevent recurred three times — most recently
+2026-09-01, when v0.20.0 answered on `PATH` against a 0.21.6 plugin cache.
+`$GOBIN` is frequently not on `PATH`, and the symlink (not a copy) keeps
+every future `make install` live with no second step; without it a stale
+hand-copied build shadows the fresh one while every existence check passes
+(the 0.19.1 incident). The manual form still works:
+
+```bash
+cd codeagent-wrapper && make build && make install
+ln -sf "$(go env GOPATH)/bin/codeagent-wrapper" ~/.local/bin/codeagent-wrapper
+codeagent-wrapper --version   # must match .claude-plugin/plugin.json
+```
 
 **3. The role table** — the wrapper resolves `--agent <role>` from
 `~/.codeagent/models.json` and fails loud with a template hint when it is
@@ -97,10 +104,16 @@ python3 scripts/seed_models.py   # copies templates/models.json.example when abs
 ```
 
 Existing entries are never overwritten, so edit `models.json` freely and
-re-run after upgrades to pick up new roles. `install.sh` is a refusal
-stub — it exits with these build instructions instead of downloading the
-upstream binary that used to overwrite local builds
-(`skills/omo/references/vendor-ops.md`).
+re-run after upgrades to pick up new roles.
+
+**4. Per project — the community store.** `python3 bin/omo-init` seeds
+`.hq/community/` from `templates/orchestration/` and installs the
+`context-loader` skill for every vendor CLI actually on PATH. It is separate
+from the three above because it writes into *your* project, not the machine.
+Skipping it is a supported state and the census will keep saying
+`store:UNSEEDED` until you do — which is the point: on 2026-09-01 a workspace
+was found where no omo session had ever seeded it, because the only
+instruction to do so lived in a reference file nobody reached.
 
 ## Backend CLIs
 

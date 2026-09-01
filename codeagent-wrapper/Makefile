@@ -1,5 +1,17 @@
 GO ?= go
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# `git describe` fails -- not "returns something odd", fails -- when the build
+# happens outside a git checkout, and a build from the PLUGIN CACHE is exactly
+# that. The old fallback stamped the literal "dev", which is a version string
+# no drift check can compare against; a session on 2026-09-01 rebuilt the wrapper
+# from the cache to fix a stale binary and got a binary that could no longer say
+# whether it was stale. Fall back to what the plugin manifest declares instead.
+# The path is NOT interpolated into the Python source: a directory containing a
+# single quote (a legal path, and plugin caches are not always tame) closes the
+# string literal, the command fails, and the fallback silently becomes `dev`
+# again -- the very state this exists to prevent (codex, 2026-09-01). Python
+# derives it from its own cwd instead, which make has already set here.
+FALLBACK_VERSION := $(shell python3 -c "import json,pathlib;print(json.loads((pathlib.Path.cwd().parent/'.claude-plugin'/'plugin.json').read_text())['version'])" 2>/dev/null || echo dev)
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo $(FALLBACK_VERSION))
 LDFLAGS := -ldflags "-X codeagent-wrapper/internal/app.version=$(VERSION)"
 
 TOOLS_BIN := $(CURDIR)/bin

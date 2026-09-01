@@ -142,11 +142,28 @@ backend:
   through `--skills`, which is a truncatable per-call payload under a
   16,000-character budget.
 
-Before the first vendor call in a project, check that the store's `rules/` exists
-and that the vendor's loader is installed. If it is not -- or if the backend is
-claude, where it cannot be -- say so: the consultation still works, but the worker is
-a stranger answering questions rather than a worker under this project's rules, and
-you weigh its answer accordingly.
+**The store check is not gated on making a vendor call.** It used to be -- this
+paragraph read "before the first vendor call" until 0.22.0 -- and on 2026-09-01 a
+session that made zero vendor calls therefore never reached it, in a workspace whose
+omo layer no session had ever seeded. A precondition you only check when you are
+about to use the thing is not a precondition.
+
+It now runs at the top of the session, and it runs without you: the
+`UserPromptSubmit` census hook measures the wrapper, the backends, and the store the
+moment `/omo` is invoked, and hands you a line like
+
+    OMO -> wrapper:0.21.6 backends:claude-only store:UNSEEDED(rules/+HUB.md)
+
+Say that line to the user before your first delegation or edit -- `Agent`, `Task`,
+`Edit`, and `Write` are denied until you do. Seed an unseeded store with
+`python3 bin/omo-init`, which also installs the loader for every vendor actually on
+PATH; `store:NO-ANCHOR` means there is no store here at all, and that one needs
+`python3 bin/omo-init --create` -- the plain form exits 2 on purpose, because
+creating a store root is a decision, not a repair. **Offer either; do not run it
+silently** -- it writes into the user's repo. If the
+loader cannot be installed -- or the backend is claude, where it cannot be -- say so:
+the consultation still works, but the worker is a stranger answering questions rather
+than a worker under this project's rules, and you weigh its answer accordingly.
 
 Setup, write permissions, and per-project pruning: `references/shared-context.md`.
 **Where the store physically lives — the anchor, the four layers, and which of them git
@@ -183,14 +200,22 @@ So before the first vendor call in a session:
    **Existing is not current, and `command -v` cannot tell you which.**
    `make install` writes to `$GOBIN` (default `~/go/bin`), a directory frequently
    absent from `PATH`, so the binary answering to the name can be an older build
-   that every existence check reports as perfectly present. Compare
-   `codeagent-wrapper --version` against the version at the top of this repo's
-   `CHANGELOG.md`; when they differ the wrapper is running code from before
-   whatever fix you are relying on. Measured twice here, and the second time the
-   call ledger shipped the day before recorded nothing at all through `PATH` while
-   the check passed. The durable fix is a symlink from a `PATH` directory to
-   `$GOBIN/codeagent-wrapper` rather than a copy, so the next `make install` is
-   live with no second step.
+   that every existence check reports as perfectly present. **The census hook does
+   this comparison for you** and reports `0.21.5!=0.21.6(STALE)`; the manual form is
+   `codeagent-wrapper --version` against the version in `.claude-plugin/plugin.json`.
+   Measured three times: the second time the call ledger shipped the day before
+   recorded nothing at all through `PATH` while the check passed, and the third
+   (2026-09-01) found v0.20.0 answering against a 0.21.6 cache. The durable fix is a
+   symlink from a `PATH` directory to `$GOBIN/codeagent-wrapper` rather than a copy,
+   so the next `make install` is live with no second step -- `python3 bin/omo-init
+   --wrapper-only` now builds, installs, and makes that symlink in one command, which
+   is what the drift kept recurring for: it was three prose steps and nobody ran all
+   three.
+
+   A wrapper built from the **plugin cache** rather than a git checkout used to stamp
+   the literal `dev`, because `git describe` fails there -- so the fix for a stale
+   binary produced a binary that could no longer report whether it was stale. The
+   Makefile now falls back to the manifest version.
 2. **Check the role's backend is on PATH** (`command -v codex`, `command -v claude`).
    A missing CLI is not an error to work around silently -- the call will fail with
    an exec error that reads like a bug in the wrapper.
@@ -202,6 +227,52 @@ So before the first vendor call in a session:
 
 Measure, do not assume: a binary can be on PATH and unauthenticated, and a backend
 can resolve to a model the account cannot reach. One cheap call settles both.
+
+## Degraded Mode — no vendor backend on this machine
+
+A claude-only machine is a supported configuration, and on one of them **routing a
+fan-out through the wrapper is a net loss, not a compromise.** Four reasons, and they
+compound: a round trip you did not need; the loss of the session's hooks and repo
+`CLAUDE.md`, because `backend/claude.go` passes `--setting-sources ""`; no loader,
+for the same reason; and `oracle` is bound to `claude-opus-5`, so an Opus session
+consulting it gets the same model a native Opus agent would have given it — ground 4
+is not satisfied and there is no model diversity to buy. Native `Agent` delegation is
+the correct call, and taking it is not a failure.
+
+**Reporting it as if nothing changed is the failure.** On 2026-09-01 a session did
+exactly this — correctly substituted native agents for twelve-plus workers — and the
+substitution reached the user as one line inside one status report, with no record
+anywhere. The user found out by opening the store and finding it empty. So degraded
+mode carries three obligations, and none of them are discharged by a passing mention:
+
+1. **Tell the user in a section of its own**, not a clause. Name which backends are
+   absent, that the fan-out is going native, and that the cross-vendor value the user
+   may have asked for is *not* available on this machine — if the brief said "use
+   cross-model a lot", that brief cannot be satisfied here and saying so is the whole
+   job. Offer the install as a question; **never install a vendor CLI on your own.**
+2. **Write the worker record** to `.hq/community/sessions/<YYYY-MM-DD>-<worker>.md`.
+   A native delegation leaves no ledger row — the ledger only sees the wrapper — so
+   this file is the only trace it ever happened, and "the wrapper was not used, so
+   there is nothing to record" is precisely the blind spot that made the incident
+   invisible.
+3. **Name the ground anyway.** Grounds 1–4 govern whether to delegate at all; the
+   backend only decides who receives it. A native delegation with no ground stated is
+   the same defect as a vendor call with no `--ground`, minus the flag that would
+   have let a review count it.
+
+### Two channel limits that bite native workers
+
+Both measured 2026-09-01, both cost that session a retry:
+
+- **A subagent's result comes back through a channel that truncates near 4 KB.** A
+  36 KB analysis was cut twice before the session gave up and switched to a file. So
+  in degraded mode, tell the worker to **write its report to a file and return the
+  path** whenever the report could exceed a page. Returning the path is not a
+  workaround; it is the default.
+- **A read-only role has no `Write` tool.** `oracle`, `architect`, and the other
+  read-only cards can still produce a file — through a `Bash` heredoc — but they will
+  not think to, so say it in the dispatch: *"write your report to `<path>` with a
+  Bash heredoc, then return only the path."*
 
 ## Vendor Invocation Format
 
@@ -383,6 +454,12 @@ Right:
 - **FORBIDDEN** to treat `explore → oracle → develop` as a mandatory workflow.
 - **FORBIDDEN** to report a vendor's output as a result. It is advice; you verify it
   against the repo before acting on it.
+- **FORBIDDEN** to substitute native `Agent` delegation for an absent backend without
+  the three obligations in *Degraded Mode* — a section of its own to the user, a
+  `sessions/` worker record, and a named ground. Doing the substitution is right;
+  doing it quietly is the 2026-09-01 defect.
+- **FORBIDDEN** to work past an `UNSEEDED` store without telling the user it is
+  unseeded. Seeding it is their call; noticing it is yours.
 
 ## Role Catalog
 
