@@ -10,7 +10,7 @@
 #   omo-consult --role oracle --backend codex --workdir . --prompt pack.md
 #
 # Surfaces, in order of preference:
-#   orca   `orca` on PATH and this worktree registered  -> a tab in Orca
+#   orca   `orca` on PATH and this worktree registered  -> a pane in THIS tab
 #   tmux   $TMUX set                                     -> a detached split
 #   none   otherwise                                     -> foreground, as today
 #
@@ -31,7 +31,8 @@ usage: omo-consult --role <name> --workdir <dir> --prompt <file>
   --prompt    file holding the Context Pack (a big pack must NOT go through a TUI)
   --out       where to tee vendor output (default: mktemp, path printed on stdout)
   --surface   force one surface instead of auto-detecting
-  --focus     bring the new panel to the front (default: do not steal focus)
+  --focus     bring the new panel to the front (default: do not steal focus).
+              Ignored on the Orca pane path — a split is already on screen.
 USAGE
     exit 2
 }
@@ -94,10 +95,30 @@ surface=$(detect_surface)
 
 case "$surface" in
     orca)
-        set -- terminal create --worktree active \
-               --title "omo:${role}${backend:+(${backend})}" \
-               --command "$cmd" --json
-        [ "$focus" -eq 1 ] && set -- "$@" --focus
+        # A consultation belongs BESIDE the session that asked for it. `terminal
+        # create` opens a separate tab, so a fan-out of four vendors buries all
+        # four behind a tab switch and the operator watches none of them; that is
+        # the opposite of why this script exists. `terminal split` puts the pane
+        # in the caller's own tab — verified against a live probe, where the
+        # split's tabId came back equal to $ORCA_TERMINAL_HANDLE's tab.
+        #
+        # Orca exports $ORCA_TERMINAL_HANDLE into every pane it manages, and that
+        # handle is the thing to split. It is absent when omo-consult runs from a
+        # shell Orca did not spawn (a cron job, a detached `sh -c`) — there is no
+        # pane to split there, so fall back to the old tab rather than failing.
+        #
+        # `terminal split` takes neither --title nor --focus: the pane inherits
+        # the tab's title, and it is already on screen, so --focus has nothing
+        # left to steal. Both are honored only on the fallback path.
+        if [ -n "${ORCA_TERMINAL_HANDLE:-}" ]; then
+            set -- terminal split --terminal "$ORCA_TERMINAL_HANDLE" \
+                   --direction vertical --command "$cmd" --json
+        else
+            set -- terminal create --worktree active \
+                   --title "omo:${role}${backend:+(${backend})}" \
+                   --command "$cmd" --json
+            [ "$focus" -eq 1 ] && set -- "$@" --focus
+        fi
         orca "$@" || {
             printf 'omo-consult: orca launch failed; rerun with --surface none\n' >&2
             exit 1
