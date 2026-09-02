@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.23.1] - 2026-09-02 — a consultation you have to go find is not a visible one
+
+### Changed
+
+- **The Orca surface now splits the caller's pane instead of opening a tab.**
+  `omo-consult` exists so a vendor call is watchable rather than an invisible
+  child process, and `orca terminal create` undercut exactly that: each
+  consultation landed in a tab of its own, so a fan-out of four vendors put all
+  four behind a tab switch and the operator watched none of them. Under a
+  two-family verification gate — the case the skill body singles out as worth
+  running — that is the default, not the edge.
+
+  It now runs `orca terminal split --terminal "$ORCA_TERMINAL_HANDLE"`, which
+  Orca exports into every pane it manages. Verified against a live probe: the
+  split's `tabId` came back equal to the calling pane's, so the vendor really is
+  beside the session rather than beneath it.
+
+  `terminal create` stays as the path taken when `$ORCA_TERMINAL_HANDLE` is
+  unset — a shell Orca did not spawn has no pane to split, and that case was
+  already reachable because surface detection tests `orca worktree current`,
+  not the pane.
+
+  `terminal split` accepts neither `--title` nor `--focus`, so the pane inherits
+  the tab's title and `--focus` is a no-op there; both still apply on the
+  `create` path, and `usage()` now says so. The tmux surface already used
+  `split-window`, so it is unchanged.
+
 ## [0.23.0] - 2026-09-01 — the store CLI was never installed, and the converter held answers it wrote as null
 
 A defect report from `ksm-MS-7E01` (a Linux container whose work tree mounts at
