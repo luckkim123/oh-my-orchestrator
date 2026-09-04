@@ -178,7 +178,7 @@ CLIs that are not installed:
 | `security` | codex | gpt-5.6-terra | high |
 | `develop` | codex | gpt-5.6-terra | medium |
 | `librarian` | claude | claude-sonnet-5 | medium |
-| `explore` | codex | gpt-5.6-terra | low |
+| `explore` | agy | gemini-3.1-pro-low | low |
 | `frontend-ui-ux-engineer` | claude | claude-sonnet-5 | medium |
 | `document-writer` | claude | claude-sonnet-5 | medium |
 
@@ -186,6 +186,13 @@ Codex defaults were lowered 2026-08-31 (develop xhigh -> medium, security xhigh 
 high): the codex and gemini subscriptions are flat-rate plans with real token
 ceilings, so resting defaults stay lean and the task-type override above is the
 way up -- not a permanently high tier.
+
+`explore` moved codex -> agy 2026-09-02 (r9 verdict, ledger sample n=3: codex
+6.3s/9.5s vs agy 7.6s at low — latency is a wash, so the move buys the 1M
+context window and keeps the codex ceiling for `develop`/`security`). Gotcha:
+agy has **no bare `gemini-3.1-pro` id** — `agy models` lists only `-low`/`-high`
+suffixed variants, so the model field must name one exactly (verified by live
+call; a bare id was never valid). `--effort` still passes alongside it.
 
 **Diversity is counted in models, not backends** -- and it is counted against *your
 own* model, not just against the previous vendor. A backend running a Claude model
@@ -348,6 +355,22 @@ swallowed as the previous flag's value and the real prompt is silently dropped. 
 `--print-timeout` for the wall clock; `--effort` takes `low|medium|high` only, with
 no `xhigh`.
 
+**The backend flag is `--backend agy`.** `--backend antigravity` is rejected with
+`unsupported backend "antigravity"`; the wrapper's own `--help` prints the closed set,
+`(codex, claude, agy)`. Measured 2026-09-04: a session read that rejection as proof
+that "agy cannot run headless on this machine", quoting a stale memory note instead
+of running `--help`, and dropped the vendor for an hour. **A backend that refuses to
+start is a name question before it is a capability question.**
+
+**`agy --print` has a hard ~297 s ceiling, and hitting it discards the work.** Past
+it the wrapper returns `timeout waiting for response`, `exit 1`, and nothing else —
+no partial answer, no findings, no sign of how far it got. The caller cannot raise
+it, so it is a **scoping constraint, not a timeout to set**: an agy task has to be
+small enough to finish inside ~4 minutes. Measured 2026-09-04 on one repo, a 5-axis
+branch review died at the ceiling with zero output; the same review split into three
+single-axis calls returned all three at `exit 0` in about three minutes each. Split
+an agy task by axis before launching, not after it dies.
+
 ## Passing skills to a worker
 
 `codeagent-wrapper --skills <name>` injects a skill card into the worker's prompt.
@@ -387,6 +410,58 @@ five-entry hardcoded list keyed on `go.mod`, `Cargo.toml`, `pyproject.toml`,
 `package.json`, and the Vue configs. Adding `.tex` or `.pptx` rows means a Go change
 and a rebuild for every OS this ships to. Pass `--skills` explicitly instead; build a
 release pipeline when explicit passing becomes the thing that hurts, not before.
+
+## While the vendor runs, you do not wait
+
+**Launching a vendor and then idling is the most expensive mistake in this skill.**
+The session that dispatched the call has a full repo in front of it and its own
+judgment available; spending that interval on nothing converts a parallel speedup
+into a serial delay. Three rules, each from a measured loss on 2026-09-04:
+
+1. **Do your own pass in parallel, on the same question.** Then the vendor's return
+   is a cross-check against a finding you already have, which is what ground 4 is
+   actually for. If the vendor dies you still have an answer.
+2. **Set a wall-clock cap when you launch, and act at the cap.** Not "check on it
+   eventually" — a number, decided before the call. Past it, take what you have and
+   move. Two named background agents ran 56 minutes producing zero bytes because
+   nobody had written down when to stop believing in them.
+3. **Liveness is measured, never read off a status string.** A wrapper log line
+   saying `status=running` is emitted on a timer and survives a dead child. Check
+   the log file's **mtime** and the process's **accumulated CPU time**; a process
+   holding steady at a few hundredths of a second is not thinking. And beware the
+   self-match: `pgrep -f "codex e --dangerously"` matches the shell of the very
+   loop testing for it, so the wait never ends. Poll a captured **PID**
+   (`kill -0 <pid>`), not a command-line pattern.
+
+## A vendor with an orchestration skill will orchestrate instead of working
+
+A vendor CLI inherits whatever skills its own host has installed, and some of those
+are dispatchers. Measured 2026-09-04: a `codex` `oracle` call given a review prompt
+with **five numbered axes** matched its host's Orca orchestration skill on
+"decomposing work across agents", dispatched three sub-workers, and sat in
+
+```
+orca orchestration check --run <id> --wait --types worker_done,escalation,question --timeout-ms 900000
+```
+
+for fifteen minutes. The workers never started — a shell mis-parse of parentheses in
+the task body — and the call ended at 38 minutes, `exit 1`, **zero findings**, having
+burned the whole subscription quota that had reset an hour earlier. It had really
+read the repo along the way (251 events); it just never reported.
+
+The shape of the prompt caused it: a numbered list of independent axes reads as a
+fan-out plan. So **state the execution constraint in the prompt itself** whenever the
+task has more than one axis:
+
+```
+## 실행 제약
+- 하위 에이전트·워커를 띄우지 마라 (orca orchestration, codeagent-wrapper,
+  병렬 디스패치 일체 금지). 네가 직접 파일을 읽고 판정하라.
+- 저장소를 수정하지 마라. 읽기 전용.
+```
+
+Do not diagnose this as "the vendor is not capable" or "this backend is broken here".
+Both readings were reached in that session and both were wrong.
 
 ## Reading a vendor result
 

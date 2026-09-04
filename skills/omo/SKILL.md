@@ -31,6 +31,18 @@ made**: undecided work stays, decided work goes.
   counts. A vendor that executed a wrong plan does so confidently.
 - **Always pass context forward** — the original user request plus any relevant prior
   output, not just the previous stage's.
+- **Never idle while a vendor runs.** Launching a call and then waiting on it turns a
+  parallel speedup into a serial delay, and it is the most expensive mistake this
+  skill enables. Work the same question yourself in parallel, fix the wall-clock cap
+  *before* you launch, and act at the cap. Liveness is measured — log mtime and
+  process CPU time against a captured PID — never read off a `status=running` line,
+  which is emitted on a timer and outlives a dead child.
+- **A vendor failure is diagnosed with the tool, not from memory.** Before concluding
+  "this backend cannot do this here", run `--help` and one cheap call. A stale note
+  saying a vendor is unusable on this machine is a hypothesis; the exit code and the
+  wrapper's own flag list are the evidence. Both failure modes measured on 2026-09-04
+  — a rejected backend *name* and a prompt shape that made the vendor orchestrate
+  instead of work — read exactly like "the vendor is broken" and were neither.
 - **Use the fewest agents possible** to satisfy the acceptance criteria. Consulting
   nobody is still a normal outcome for small, decided work — the round trip has a floor
   and a two-line edit does not clear it.

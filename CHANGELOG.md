@@ -2,6 +2,56 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.0] - 2026-09-04 — the session waited on a vendor that had already stopped answering
+
+### Changed
+
+- **`explore` role moved codex → agy (`gemini-3.1-pro-low`)** — the r9 verdict
+  (audit plan item 7, user-approved 2026-09-02, four days ahead of the 09-06
+  collection deadline). Ledger sample n=3 at effort low: codex 6.3s/9.5s vs agy
+  7.6s — latency is a wash, so the move buys agy's 1M context for sweeps and
+  preserves the codex flat-rate ceiling for `develop`/`security`. Item 8 closed
+  the same day with no change: zero `develop`/`security` calls since the
+  2026-08-31 effort lowering means no degradation evidence — medium/high stand.
+  Touched: `templates/models.json.example`, vendor-ops.md role table (+ a note
+  that agy has no bare `gemini-3.1-pro` id — only `-low`/`-high` variants, so
+  the model field must name one exactly; verified by live call).
+
+- **The skill now forbids idling on a vendor, and says how to tell a live call
+  from a dead one.** One session on 2026-09-04 lost roughly an hour across three
+  shapes of the same mistake, none of which the skill had a word about. Two named
+  background agents ran 56 minutes emitting zero bytes while the session waited,
+  because no wall-clock cap had been decided before launching. A `codex` `oracle`
+  call given a review prompt with five numbered axes matched its host's Orca
+  orchestration skill, dispatched three sub-workers that never started, sat in
+  `orca orchestration check --wait --timeout-ms 900000`, and ended at 38 minutes
+  with `exit 1` and zero findings — having burned the whole subscription quota
+  that had reset an hour earlier. And `--backend antigravity` was rejected as an
+  unsupported backend (the flag takes `agy`), which the session diagnosed from a
+  stale memory note as "agy cannot run headless here" instead of running `--help`.
+
+  New in `SKILL.md` **Hard Constraints**, so it binds before any reference card is
+  opened: never idle while a vendor runs — work the same question in parallel, fix
+  the cap before launching, act at the cap; measure liveness by log mtime and
+  process CPU time against a captured PID, never a `status=running` line, which is
+  emitted on a timer and outlives a dead child. And: diagnose a vendor failure with
+  `--help` plus one cheap call, never from memory.
+
+  New in `references/vendor-ops.md`: a **"While the vendor runs, you do not wait"**
+  section (including the `pgrep -f` self-match that makes a wait loop never end —
+  poll a PID), a **"A vendor with an orchestration skill will orchestrate instead
+  of working"** section carrying the execution-constraint block to paste into any
+  multi-axis prompt, and two agy facts — the `--backend agy` name, and the hard
+  ~297 s `--print` ceiling that returns `timeout waiting for response` with the work
+  discarded. That ceiling is a **scoping** constraint: the same 5-axis review that
+  died at it returned `exit 0` three times when split into single-axis calls.
+
+### Fixed
+
+- **CHANGELOG: `[Unreleased]` had been inserted over the `## [0.23.0]` header**,
+  leaving a shipped release's notes running on under the wrong heading. Header
+  restored; the 2026-09-02 entry now sits above it where it belongs.
+
 ## [0.23.0] - 2026-09-01 — the store CLI was never installed, and the converter held answers it wrote as null
 
 A defect report from `ksm-MS-7E01` (a Linux container whose work tree mounts at
