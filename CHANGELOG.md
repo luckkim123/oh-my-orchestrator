@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.2] - 2026-09-04 — the agy ceiling is the wrapper's, and agy writes somewhere else
+
+### Fixed
+
+- **The "hard ~297 s ceiling" on `agy --print` was written one scope too wide.**
+  0.24.0 called it something "the caller cannot raise". The limit is
+  `agy --print-timeout`, whose default of 5m is exactly where ~297 s comes from,
+  and agy accepts `--print-timeout 9m`. What cannot raise it is
+  `codeagent-wrapper`, which lists no passthrough and no extra-args flag — so the
+  sentence is true of wrapper calls and false of agy. Corrected to say which layer
+  owns the ceiling, keeping the scoping advice for wrapper calls, where it still
+  holds.
+
+### Added
+
+- **agy writes files into `~/.gemini/antigravity-cli/scratch/`, not the workdir
+  it was handed.** Three `develop` rounds on 2026-09-04 each reported a path under
+  that scratch tree while `git status` in the target repo stayed clean — which
+  reads exactly like a vendor that produced nothing, and is not. vendor-ops now
+  says to read the reported path before concluding the call failed.
+
 ## [0.24.1] - 2026-09-04 — the cap rule shipped without a cap you can actually use
 
 ### Fixed

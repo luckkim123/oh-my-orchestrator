@@ -381,14 +381,30 @@ that "agy cannot run headless on this machine", quoting a stale memory note inst
 of running `--help`, and dropped the vendor for an hour. **A backend that refuses to
 start is a name question before it is a capability question.**
 
-**`agy --print` has a hard ~297 s ceiling, and hitting it discards the work.** Past
-it the wrapper returns `timeout waiting for response`, `exit 1`, and nothing else —
-no partial answer, no findings, no sign of how far it got. The caller cannot raise
-it, so it is a **scoping constraint, not a timeout to set**: an agy task has to be
-small enough to finish inside ~4 minutes. Measured 2026-09-04 on one repo, a 5-axis
-branch review died at the ceiling with zero output; the same review split into three
-single-axis calls returned all three at `exit 0` in about three minutes each. Split
-an agy task by axis before launching, not after it dies.
+**Through this wrapper, `agy --print` has a ~297 s ceiling, and hitting it discards
+the work.** Past it you get `timeout waiting for response`, `exit 1`, and nothing
+else — no partial answer, no findings, no sign of how far it got.
+
+The ceiling belongs to the **wrapper**, not to agy. `agy` itself takes
+`--print-timeout` (default 5m, which is where ~297 s comes from) and will accept
+`--print-timeout 9m`; `codeagent-wrapper --help` lists no passthrough for it and
+no generic extra-args flag, so a wrapper call is stuck at the default. Treat it as
+a **scoping constraint** whenever you go through the wrapper — an agy task has to
+finish inside ~4 minutes — and reach for a direct `agy` invocation only when a task
+genuinely cannot be split.
+
+Splitting is usually the right answer anyway. Measured 2026-09-04 on one repo: a
+5-axis branch review died at the ceiling with zero output, while the same review
+split into three single-axis calls returned all three at `exit 0` in about three
+minutes each. Split by axis before launching, not after it dies.
+
+**agy writes files into its own scratch sandbox, not your workdir.** A `develop`
+call that produces a file reports a path under
+`~/.gemini/antigravity-cli/scratch/<relative path>` and leaves the repo untouched —
+`git status` stays clean and the file you asked for is not where you asked for it.
+Measured 2026-09-04: three `develop` rounds all landed there. This reads exactly
+like "the vendor produced nothing", so read the reported path before concluding
+that; the result is real and copying it in is a one-liner.
 
 ## Passing skills to a worker
 
