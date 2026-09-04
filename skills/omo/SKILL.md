@@ -38,11 +38,14 @@ made**: undecided work stays, decided work goes.
   process CPU time against a captured PID — never read off a `status=running` line,
   which is emitted on a timer and outlives a dead child.
 - **A vendor failure is diagnosed with the tool, not from memory.** Before concluding
-  "this backend cannot do this here", run `--help` and one cheap call. A stale note
-  saying a vendor is unusable on this machine is a hypothesis; the exit code and the
-  wrapper's own flag list are the evidence. Both failure modes measured on 2026-09-04
-  — a rejected backend *name* and a prompt shape that made the vendor orchestrate
-  instead of work — read exactly like "the vendor is broken" and were neither.
+  "this backend cannot do this here", run three things that take thirty seconds:
+  `command -v <cli>`, `<cli> --version`, and one cheap wrapper call. A stale note
+  saying a vendor is unusable on this machine is a hypothesis; the exit code, the
+  version banner, and the wrapper's own flag list are the evidence. Three failure
+  modes measured on 2026-09-04 — a rejected backend *name*, a prompt shape that made
+  the vendor orchestrate instead of work, and a half-written npm install whose native
+  binary was present while its manifest was not — all read exactly like "the vendor is
+  broken" or "we are out of quota", and none of them was that.
 - **Use the fewest agents possible** to satisfy the acceptance criteria. Consulting
   nobody is still a normal outcome for small, decided work — the round trip has a floor
   and a two-line edit does not clear it.

@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.1] - 2026-09-04 — the cap rule shipped without a cap you can actually use
+
+### Fixed
+
+- **`timeout` does not exist on macOS, so the 0.24.0 rule "set a wall-clock cap
+  when you launch" had no mechanism behind it.** Hit within minutes of shipping it:
+  `timeout 90 codeagent-wrapper …` returned `command not found`, and because the
+  call sat in a pipeline the reported exit status came from the *last* command, so
+  the failure looked like a success. vendor-ops now carries the portable
+  substitute — `perl -e 'alarm <sec>; exec @ARGV'`, which survives the `exec`
+  because SIGALRM is delivered to the replaced process — together with capturing
+  `$!` at launch as the liveness handle rule 3 wants.
+
+- **A vendor CLI that is installed is not a vendor CLI that runs.** The Codex
+  section said `which codex` / `codex --version` as one breath; they are two
+  different checks and only the second one is evidence. An interrupted
+  `npm install -g` left this machine with the platform package present at its full
+  177 MB and its `package.json` never written, which makes
+  `require.resolve('<platform-pkg>/package.json')` throw inside `bin/codex.js` —
+  and the wrapper reports the whole thing as `codex command not found in PATH`.
+  The section now names that shape, the same-version repair
+  (`npm install -g @openai/codex@<installed version>`, not `@latest`, which drifts
+  the model defaults), and the fact that a genuine quota failure is a *separate*
+  signal (`turn.failed … usage limit`, `elapsed=10s`, exit 1) that must not absorb
+  the diagnosis. Both were true on one machine within one hour.
+
+- The `SKILL.md` diagnosis constraint now names three checks rather than one
+  (`command -v`, `--version`, one cheap call) and counts three measured failure
+  modes instead of two.
+
 ## [0.24.0] - 2026-09-04 — the session waited on a vendor that had already stopped answering
 
 ### Changed

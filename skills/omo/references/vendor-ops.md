@@ -306,8 +306,27 @@ vendor goes through `agy`; without it, `claude` carries it.
 
 ## Codex
 
-**Not found.** `which codex` / `codex --version`; install with
-`npm install -g @openai/codex`.
+**Not found -- and "found" is not the same as "works".** `command -v codex`, then
+`codex --version`. Run both: an interrupted global install leaves a state where the
+package directory exists at full size and the CLI still cannot start. Measured on a
+Mac, 2026-09-04: `/opt/homebrew/bin/codex` was gone (only npm's staging symlink
+`.codex-<hash>` remained), and after restoring that link by hand the launcher threw
+`Missing optional dependency @openai/codex-darwin-arm64` -- because the platform
+package's **`package.json` had never been written**, while its 177 MB native binary
+sat there intact. `bin/codex.js` resolves the vendor root through
+`require.resolve('<platform-pkg>/package.json')`, so one missing manifest is fatal
+and nothing else reports it. The wrapper surfaces all of this as
+`codex command not found in PATH`, which reads like a PATH problem and is not one.
+
+Repair without version drift by reinstalling the **same** version:
+`npm install -g @openai/codex@<version from the installed package.json>`. Reaching for
+`@latest` here silently upgrades the model defaults along with the binary.
+
+**Usage limit is a real and separate failure.** It arrives as
+`turn.failed ... You've hit your usage limit`, with `elapsed=10s` and exit 1. Do not
+let it absorb the diagnosis above: on 2026-09-04 both were true on the same machine
+within the same hour, and treating the quota message as the whole story left a
+three-minute fix undone for hours.
 
 **Auth.** `codex login`; check with `codex login status`.
 
@@ -425,6 +444,22 @@ into a serial delay. Three rules, each from a measured loss on 2026-09-04:
    eventually" — a number, decided before the call. Past it, take what you have and
    move. Two named background agents ran 56 minutes producing zero bytes because
    nobody had written down when to stop believing in them.
+
+   The cap needs a mechanism, and **macOS has no `timeout`** — neither does it have
+   `gtimeout` unless coreutils is installed, so the obvious incantation fails with
+   `command not found` and, if you wrote it inside a pipeline, the launch proceeds
+   uncapped while the exit status reports the pipeline's last command. Portable
+   substitute, no install required:
+
+   ```bash
+   nohup perl -e 'alarm 900; exec @ARGV' \
+       codeagent-wrapper --agent develop --backend codex - "$PWD" \
+       < prompt.txt > out.txt 2>&1 &
+   echo $! > run.pid          # capture the PID at launch; this is the liveness handle
+   ```
+
+   `alarm` fires SIGALRM in the exec'd process, so the cap holds even though the
+   shell has been replaced. Then poll `kill -0 "$(cat run.pid)"` — see rule 3.
 3. **Liveness is measured, never read off a status string.** A wrapper log line
    saying `status=running` is emitted on a timer and survives a dead child. Check
    the log file's **mtime** and the process's **accumulated CPU time**; a process
